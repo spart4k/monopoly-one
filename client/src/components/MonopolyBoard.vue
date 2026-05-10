@@ -284,23 +284,24 @@ watch(
           </p>
 
           <!-- 🧪 Дебаг-селект (скрыть перед релизом) -->
+          <!-- 🧪 Дебаг-селект -->
           <div class="w-72 mt-1">
             <label class="text-[10px] font-semibold text-gray-400 mb-0.5 block text-center">🧪 Тест-бросок:</label>
             <select v-model="debugTarget" class="w-full bg-gray-100 border border-gray-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500">
               <option :value="null">🎲 Случайный бросок</option>
+
+              <optgroup label="🚔 Тюрьма">
+                <option :value="30">🚔 Отправиться в тюрьму (Go to Jail)</option>
+              </optgroup>
+
               <optgroup label="🃏 Шанс">
-                <option :value="7">Клетка 7</option>
-                <option :value="22">Клетка 22</option>
-                <option :value="36">Клетка 36</option>
+                <option :value="7">Клетка 7</option><option :value="22">Клетка 22</option><option :value="36">Клетка 36</option>
               </optgroup>
               <optgroup label="💰 Казна">
-                <option :value="2">Клетка 2</option>
-                <option :value="17">Клетка 17</option>
-                <option :value="33">Клетка 33</option>
+                <option :value="2">Клетка 2</option><option :value="17">Клетка 17</option><option :value="33">Клетка 33</option>
               </optgroup>
               <optgroup label="🏠 Улицы">
-                <option :value="1">Ленинградская (60₽)</option>
-                <option :value="39">Советской Армии (400₽)</option>
+                <option :value="1">Ленинградская (60₽)</option><option :value="39">Советской Армии (400₽)</option>
               </optgroup>
             </select>
           </div>

@@ -9,14 +9,55 @@ export function handleRollDice(room: Room, playerId: string, roomViews: Map<stri
   const player = room.getPlayer(playerId)
   if (!player) return { error: 'Игрок не найден' }
 
+  // 🔒 Блокировка: нельзя ходить, если висит действие (кроме разрешённого дубля)
   if (room.state.actionPending !== 'NONE' && room.state.actionPending !== 'DOUBLE_TURN') {
     return { error: `🚫 Сначала завершите действие: ${room.state.actionPending}` }
   }
 
+  // 🚔 ЛОГИКА ТЮРЬМЫ (вместо блокировки)
   if (player.isInJail) {
-    return { error: '🚫 Игрок в тюрьме. Используйте действия выхода.' }
+    let dice: [number, number] = [Math.ceil(Math.random() * 6), Math.ceil(Math.random() * 6)]
+    room.state.lastDice = dice
+    const isDouble = dice[0] === dice[1]
+    const oldPos = player.pos // 10 (Тюрьма)
+
+    room.addLog(`🎲 ${player.name}: ${dice[0]}+${dice[1]}${isDouble ? ' (ДУБЛЬ!)' : ''} → попытка выхода`)
+
+    if (isDouble) {
+      // ✅ Дубль → выход и перемещение
+      player.isInJail = false
+      player.jailTurns = 0
+      player.pos = (player.pos + dice[0] + dice[1]) % 40
+      room.addLog(`🔓 ${player.name} вышел из тюрьмы по дублю!`)
+      broadcast(roomViews, room.id, { type: 'PLAYER_MOVED', playerId, from: oldPos, to: player.pos, dice })
+      room.finishTurn()
+      broadcast(roomViews, room.id, { type: 'SYNC_STATE', payload: buildSyncPayload(room.state) })
+      return { success: true }
+    } else {
+      // ❌ Не дубль → считаем попытку
+      player.jailTurns++
+      if (player.jailTurns >= 3) {
+        // 3-я неудача → авто-выход за 50₽ (если хватает денег)
+        if (player.money >= 50) {
+          player.money -= 50
+          player.isInJail = false
+          player.jailTurns = 0
+          player.pos = (player.pos + dice[0] + dice[1]) % 40
+          room.addLog(`💸 ${player.name} заплатил 50₽ за авто-выход из тюрьмы`)
+          broadcast(roomViews, room.id, { type: 'PLAYER_MOVED', playerId, from: oldPos, to: player.pos, dice })
+        } else {
+          room.addLog(`💀 ${player.name} не может заплатить 50₽. Остаётся в тюрьме`)
+        }
+      } else {
+        room.addLog(`❌ ${player.name} не выбросил дубль. Попытка ${player.jailTurns}/3`)
+      }
+      room.finishTurn()
+      broadcast(roomViews, room.id, { type: 'SYNC_STATE', payload: buildSyncPayload(room.state) })
+      return { success: true }
+    }
   }
 
+  // 🎲 ОБЫЧНЫЙ ХОД (игрок НЕ в тюрьме)
   let dice: [number, number] = [Math.ceil(Math.random() * 6), Math.ceil(Math.random() * 6)]
   let finalPos = player.pos
 
@@ -37,8 +78,6 @@ export function handleRollDice(room: Room, playerId: string, roomViews: Map<stri
   const isDouble = dice[0] === dice[1]
   const doubleLog = isDouble ? ' (ДУБЛЬ!)' : ''
   room.addLog(`🎲 ${player.name}: ${dice[0]}+${dice[1]}${doubleLog} → ${finalPos}`)
-
-  // Сохраняем флаг дубля для последующих действий (покупка, карты, налоги)
   room.state.lastRollWasDouble = isDouble
 
   // 💰 Проход через СТАРТ
@@ -100,7 +139,7 @@ export function handleRollDice(room: Room, playerId: string, roomViews: Map<stri
   else if (space.type === 'chance' || space.type === 'community') {
     return handleDrawCard(room, playerId, space.type, roomViews)
   }
-  // 🚔 Тюрьма
+  // 🚔 Попадание на "ИДИ В ТЮРЬМУ"
   else if (space.type === 'go_to_jail') {
     player.pos = 10
     player.isInJail = true
@@ -129,8 +168,9 @@ export function handleRollDice(room: Room, playerId: string, roomViews: Map<stri
       player.consecutiveDoubles = 0
       room.finishTurn()
     }
+  } else {
+    player.consecutiveDoubles = 0
   }
-  // Если actionRequired === true, ход НЕ передается. Флаг lastRollWasDouble сохранён.
 
   broadcast(roomViews, room.id, { type: 'PLAYER_MOVED', playerId, from: oldPos, to: player.pos, dice })
   if (!actionRequired) {
