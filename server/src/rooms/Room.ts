@@ -13,6 +13,7 @@ export type Player = {
   jailTurns: number
   jailCards: number
   consecutiveDoubles: number
+  isReady: boolean // 🔑 NEW
 }
 
 export type RoomState = {
@@ -32,14 +33,9 @@ export class Room {
 
   constructor(public id: string, initialState?: Partial<RoomState>) {
     this.state = {
-      status: 'LOBBY',
-      players: [],
-      currentTurn: '',
-      logs: ['🏠 Комната создана'],
-      lastDice: [1, 1],
-      actionPending: 'NONE',
-      lastRollWasDouble: false,
-      ...initialState
+      status: 'LOBBY', players: [], currentTurn: '',
+      logs: ['🏠 Комната создана'], lastDice: [1, 1],
+      actionPending: 'NONE', lastRollWasDouble: false, ...initialState
     }
   }
 
@@ -47,8 +43,12 @@ export class Room {
   get playerCount() { return this.state.players.length }
   getNextColor() { return CONSTANTS.COLORS[this.state.players.length % CONSTANTS.COLORS.length] }
 
-  addPlayer(p: Omit<Player, 'properties' | 'isInJail' | 'jailTurns' | 'jailCards' | 'consecutiveDoubles'>) {
-    const newP: Player = { ...p, properties: [], isInJail: false, jailTurns: 0, jailCards: 0, consecutiveDoubles: 0 }
+  addPlayer(p: Omit<Player, 'properties' | 'isInJail' | 'jailTurns' | 'jailCards' | 'consecutiveDoubles' | 'isReady'>) {
+    const isFirst = this.state.players.length === 0
+    const newP: Player = {
+      ...p, properties: [], isInJail: false, jailTurns: 0, jailCards: 0,
+      consecutiveDoubles: 0, isReady: isFirst // 🔑 Хост сразу "готов"
+    }
     this.state.players.push(newP)
     return newP
   }
@@ -59,7 +59,7 @@ export class Room {
 
   addLog(msg: string) {
     this.state.logs.push(msg)
-    if (this.state.logs.length > CONSTANTS.MAX_LOGS) this.state.logs.shift()
+    if (this.state.logs.length > 50) this.state.logs.shift()
   }
 
   startGame() {
@@ -84,10 +84,8 @@ export class Room {
     if (this.state.status !== 'PLAYING') return { success: false, error: '🚫 Игра не активна' }
     if (this.state.currentTurn !== playerId) return { success: false, error: '🚫 Не ваш ход' }
     if (this.state.actionPending !== 'NONE' && this.state.actionPending !== 'DOUBLE_TURN') return { success: false, error: '🚫 Сначала завершите действие' }
-
     const p = this.getPlayer(playerId)
     if (!p) return { success: false, error: '🚫 Игрок не найден' }
-
     const dice: [number, number] = [Math.ceil(Math.random() * 6), Math.ceil(Math.random() * 6)]
     this.state.lastDice = dice
     return { success: true, dice, from: p.pos }

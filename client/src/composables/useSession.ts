@@ -1,26 +1,19 @@
-import { ref, onMounted } from 'vue'
+// client/src/composables/useSession.ts
+import { ref } from 'vue'
 
 export function useSession() {
-  const myId = ref<string | null>(null)
-  const myName = ref<string>('')
-
-  const load = () => {
-    try {
-      const raw = localStorage.getItem('monopoly_session')
-      if (raw) {
-        const s = JSON.parse(raw)
-        myId.value = s.id
-        myName.value = s.name || ''
-      }
-    } catch {}
-  }
+  // 🔑 Загружаем СИНХРОННО. myId будет доступен сразу при монтировании компонента
+  const myId = ref<string | null>(
+    localStorage.getItem('monopoly_player_id') || `p_${Math.random().toString(36).slice(2, 8)}`
+  )
+  const myName = ref<string>(localStorage.getItem('monopoly_username') || '')
 
   const save = (id: string, name: string) => {
-    localStorage.setItem('monopoly_session', JSON.stringify({ id, name }))
+    localStorage.setItem('monopoly_player_id', id)
+    localStorage.setItem('monopoly_username', name)
     myId.value = id
     myName.value = name
   }
 
-  onMounted(load)
-  return { myId, myName, save, load }
+  return { myId, myName, save }
 }
