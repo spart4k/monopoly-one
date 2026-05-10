@@ -82,11 +82,46 @@ const ownerMap = computed(() => {
 // 🔑 Безопасная генерация клеток (игнорирует undefined)
 const spaces = Array.from({ length: 40 }, (_, i) => getSpaceById(i)).filter(Boolean) as ISpaceData[]
 
+// 🔑 Позиции для сетки 12 колонок × 8 рядов
+// Визуальные углы: 0, 10, 13, 20, 23, 30, 32
 const getPos = (i: number) => {
-  if (i <= 10) return { row: 11, col: 11 - i }
-  if (i <= 19) return { row: 21 - i, col: 1 }
-  if (i <= 30) return { row: 1, col: i - 19 }
-  return { row: i - 29, col: 11 }
+  if (i === 40) i = 0
+
+  // === ВЕРХНЯЯ СТОРОНА (ряд 1) ===
+  if (i === 0) return { row: 1, col: 1 }           // START
+  if (i >= 1 && i <= 9) return { row: 1, col: i + 1 }  // 1→col2, ..., 9→col10
+  if (i === 10) return { row: 1, col: 12 }         // Just Visiting
+
+  // === ПРАВАЯ СТОРОНА (колонка 12) ===
+  if (i === 11) return { row: 2, col: 12 }
+  if (i === 12) return { row: 3, col: 12 }
+  if (i === 13) return { row: 4, col: 12 }         // 🔷 Визуальный угол: Красноармейская
+  if (i === 14) return { row: 5, col: 12 }
+  if (i === 15) return { row: 6, col: 12 }
+  if (i === 16) return { row: 7, col: 12 }
+
+  // === НИЖНЯЯ СТОРОНА (ряд 8) ===
+  if (i === 17) return { row: 8, col: 11 }
+  if (i === 18) return { row: 8, col: 10 }
+  if (i === 19) return { row: 8, col: 9 }
+  if (i === 20) return { row: 8, col: 1 }          // Free Parking
+  if (i >= 21 && i <= 29) return { row: 8, col: i - 19 }  // 21→col2, ..., 29→col10
+  if (i === 30) return { row: 8, col: 12 }         // Go to Jail
+
+  // === ЛЕВАЯ СТОРОНА (колонка 1, снизу→вверх) ===
+  if (i === 31) return { row: 7, col: 1 }          // 🔑 ИСПРАВЛЕНО: col: 1, а не 12
+  if (i === 32) return { row: 6, col: 1 }          // 🔷 Визуальный угол: Советской Армии
+  if (i === 33) return { row: 5, col: 1 }
+  if (i === 34) return { row: 4, col: 1 }
+  if (i === 35) return { row: 3, col: 1 }
+  if (i === 36) return { row: 2, col: 1 }
+
+  // === Переход к START (верхний ряд) ===
+  if (i === 37) return { row: 1, col: 11 }
+  if (i === 38) return { row: 1, col: 10 }
+  if (i === 39) return { row: 1, col: 9 }
+
+  return { row: 1, col: 1 } // Фоллбэк
 }
 
 const rollDice = () => {
@@ -147,39 +182,63 @@ watch(() => store.logs.length, async () => {
   <div class="h-screen w-screen bg-gray-900 flex overflow-hidden">
     <LeftBar :hovered-owner-id="hoveredOwnerId" :set-hovered-owner-id="(id) => hoveredOwnerId = id" />
 
-    <main class="flex-1 flex flex-col items-center justify-center p-4 overflow-hidden">
-      <div class="relative w-full max-w-5xl aspect-square bg-white rounded-2xl shadow-2xl overflow-hidden grid grid-cols-11 grid-rows-11 gap-1 p-2 border-4 border-gray-800">
+    <main class="flex-1 flex flex-col items-center justify-center p-2 md:p-4 overflow-hidden">
+      <!-- 🔑 Сетка 12×8: больше ширины, 8 рядов по высоте -->
+      <div class="relative w-full max-w-7xl aspect-[1.5/1] bg-white rounded-2xl shadow-2xl overflow-hidden grid grid-cols-12 grid-rows-8 gap-0.5 p-1 border-4 border-gray-800">
 
-        <div v-for="space in spaces" :key="space.id" @click="openSpaceInfo(space.id)" @mouseenter="handleTileHover(space)" @mouseleave="clearTileHover()"
-             class="relative border border-gray-300/50 flex flex-col items-center justify-center text-[10px] md:text-xs font-medium select-none cursor-pointer transition-all duration-150"
-             :class="[space.color || 'bg-gray-200', space.textColor, space.type === 'corner' ? 'font-bold bg-gray-200' : '', ownerMap[space.id] === hoveredOwnerId ? 'ring-2 ring-white scale-[1.03] z-10 brightness-110' : '', hoveredGroupColor && space.color === hoveredGroupColor && space.type === 'property' ? 'brightness-125 ring-1 ring-yellow-400 z-10' : 'hover:brightness-95']"
+        <!-- Клетки доски -->
+        <div v-for="(space, i) in spaces" :key="space.id" @click="openSpaceInfo(space.id)" @mouseenter="handleTileHover(space)" @mouseleave="clearTileHover()"
+             class="relative border border-gray-300/30 flex items-center justify-center text-[9px] md:text-[10px] font-medium select-none cursor-pointer transition-all duration-150 overflow-hidden aspect-square"
+             :class="[
+               space.color || 'bg-gray-200',
+               space.textColor,
+               // 🔷 Визуальные углы: чуть крупнее шрифт
+               [0, 10, 13, 20, 23, 30, 32].includes(i) ? 'font-bold bg-gray-200 text-[10px] md:text-xs' : '',
+               // 🔍 Подсветка
+               ownerMap[space.id] === hoveredOwnerId ? 'ring-2 ring-white scale-[1.02] z-10 brightness-110' : '',
+               hoveredGroupColor && space.color === hoveredGroupColor && space.type === 'property' ? 'brightness-125 ring-1 ring-yellow-400 z-10' : 'hover:brightness-95'
+             ]"
              :style="`grid-row: ${getPos(space.id).row}; grid-column: ${getPos(space.id).col};`">
 
-          <span class="text-center leading-tight px-0.5 break-words font-semibold">{{ space.name }}</span>
-          <span v-if="space.price > 0" class="text-[9px] font-mono text-gray-600 mt-0.5 bg-white/50 px-1 rounded">{{ space.price }}₽</span>
+          <div class="w-full h-full flex flex-col items-center justify-center p-0.5 relative">
 
-          <!-- 🔑 ИНДИКАТОРЫ ДОМОВ/ОТЕЛЕЙ НА КЛЕТКЕ -->
-          <div v-if="space.type === 'property' && ownerMap[space.id]" class="absolute top-1 left-1 flex gap-0.5 z-20">
-            <template v-for="h in (store.players.find(p => p.id === ownerMap[space.id])?.houses?.[space.id] || 0)" :key="h">
-              <span v-if="h < 5" class="text-[10px] drop-shadow-sm">🏠</span>
-              <span v-else class="text-[10px] drop-shadow-sm">🏨</span>
+            <!-- 🔼 Горизонтальный текст для верх/низ/углов -->
+            <template v-if="true">
+              <span class="text-center leading-tight font-semibold px-0.5 break-words text-xs">{{ space.name }}</span>
+              <span v-if="space.price > 0" class="text-[8px] font-mono text-gray-600 mt-0.5 bg-white/40 px-0.5 rounded">{{ space.price }}₽</span>
             </template>
-          </div>
 
-          <div v-if="ownerMap[space.id]" class="absolute top-1 right-1 w-2 h-2 rounded-full ring-1 ring-white/50" :class="store.players.find(p => p.id === ownerMap[space.id])?.color || 'bg-gray-500'"></div>
-          <div class="absolute bottom-1 flex gap-1">
-            <div v-for="p in store.players.filter(pl => pl.pos === space.id)" :key="p.id" class="w-5 h-5 rounded-full border-2 border-white/90 shadow-md flex items-center justify-center text-[9px] font-bold text-white select-none" :style="{ backgroundColor: getPlayerColorHex(p.color) }" :title="p.name">{{ p.name?.charAt(0).toUpperCase() }}</div>
+            <!-- 🔽 Повёрнутый текст: боковые стороны (лево/право) -->
+
+            <!-- Индикаторы домов -->
+            <div v-if="space.type === 'property' && ownerMap[space.id]" class="absolute top-0.5 left-0.5 flex gap-0.5 z-20">
+              <template v-for="h in (store.players.find(p => p.id === ownerMap[space.id])?.houses?.[space.id] || 0)" :key="h">
+                <span v-if="h < 5" class="text-[8px]">🏠</span>
+                <span v-else class="text-[8px]">🏨</span>
+              </template>
+            </div>
+
+            <div v-if="ownerMap[space.id]" class="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full ring-1 ring-white/50" :class="store.players.find(p => p.id === ownerMap[space.id])?.color || 'bg-gray-500'"></div>
+            <div class="absolute bottom-0.5 flex gap-0.5">
+              <div v-for="p in store.players.filter(pl => pl.pos === space.id)" :key="p.id"
+                   class="w-3.5 h-3.5 rounded-full border-[1.5px] border-white/90 shadow-md flex items-center justify-center text-[7px] font-bold text-white"
+                   :style="{ backgroundColor: getPlayerColorHex(p.color) }" :title="p.name">
+                {{ p.name?.charAt(0).toUpperCase() }}
+              </div>
+            </div>
           </div>
         </div>
 
-        <div class="col-start-2 col-span-9 row-start-2 row-span-9 bg-gray-50 text-gray-800 flex flex-col items-center justify-center p-6 rounded-2xl gap-4">
-          <div class="flex gap-4 bg-white px-6 py-3 rounded-xl shadow-md border border-gray-200">
-            <div v-for="(d, i) in store.lastDice" :key="i" class="w-14 h-14 bg-gray-100 rounded-xl flex items-center justify-center font-bold text-3xl text-gray-800 shadow-inner">{{ d }}</div>
+        <!-- 🔑 Центр доски: занимает col 2-11, row 2-7 (при сетке 12×8) -->
+        <div class="col-start-2 col-span-10 row-start-2 row-span-6 bg-gray-50 text-gray-800 flex flex-col items-center justify-center p-4 md:p-6 rounded-2xl gap-3 md:gap-4">
+
+          <!-- Кубики -->
+          <div class="flex gap-3 md:gap-4 bg-white px-4 md:px-6 py-2 md:py-3 rounded-xl shadow-md border border-gray-200">
+            <div v-for="(d, i) in store.lastDice" :key="i" class="w-12 h-12 md:w-14 md:h-14 bg-gray-100 rounded-xl flex items-center justify-center font-bold text-2xl md:text-3xl text-gray-800 shadow-inner">{{ d }}</div>
           </div>
 
-          <div class="flex flex-col items-center gap-3 w-full">
-
-            <!-- Основная кнопка броска -->
+          <!-- Кнопки управления -->
+          <div class="flex flex-col items-center gap-2 md:gap-3 w-full max-w-xs">
             <button
                 @click="rollDice"
                 :disabled="
@@ -189,7 +248,7 @@ watch(() => store.logs.length, async () => {
                   (isInJail && !store.pendingAction) ||
                   !isWsReady()
                 "
-                class="w-72 px-5 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-semibold rounded-xl transition active:scale-95 shadow-lg text-lg flex items-center justify-center gap-2"
+                class="w-full px-4 md:px-5 py-2.5 md:py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-semibold rounded-xl transition active:scale-95 shadow-lg text-base md:text-lg flex items-center justify-center gap-2"
             >
               <span v-if="store.pendingAction === 'DOUBLE_TURN' && isMyTurn">🎲 Бросить снова (дубль)!</span>
               <span v-else-if="isInJail && isMyTurn && !store.pendingAction">🔒 Вы в тюрьме</span>
@@ -198,117 +257,92 @@ watch(() => store.logs.length, async () => {
               <span v-else>⏳ Ждите хода: {{ getPlayerName(store.currentTurn) }}</span>
             </button>
 
-            <!-- 🔑 Кнопки выхода из тюрьмы (показываются ТОЛЬКО когда игрок в тюрьме и это его ход) -->
-            <div v-if="isInJail && isMyTurn && !store.pendingAction" class="flex flex-col gap-2 w-72">
+            <!-- Кнопки выхода из тюрьмы -->
+            <div v-if="isInJail && isMyTurn && !store.pendingAction" class="flex flex-col gap-1.5 w-full">
               <button
                   @click="handlePayJailFine"
                   :disabled="(store.players.find(p => p.id === myId)?.money || 0) < 50"
-                  class="w-full px-4 py-2 bg-yellow-500 hover:bg-yellow-600 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition text-sm"
-              >
-                💸 Заплатить 50₽
-              </button>
+                  class="w-full px-3 py-1.5 md:px-4 md:py-2 bg-yellow-500 hover:bg-yellow-600 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition text-xs md:text-sm"
+              >💸 Заплатить 50₽</button>
               <button
                   @click="handleUseJailCard"
                   :disabled="(store.players.find(p => p.id === myId)?.jailCards || 0) < 1"
-                  class="w-full px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition text-sm"
-              >
-                🎫 Использовать карту выхода
-              </button>
+                  class="w-full px-3 py-1.5 md:px-4 md:py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition text-xs md:text-sm"
+              >🎫 Использовать карту</button>
               <button
                   @click="handleJailRoll"
-                  class="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition text-sm"
-              >
-                🎲 Бросить на дубль ({{ (store.players.find(p => p.id === myId)?.jailTurns || 0) }}/3)
-              </button>
+                  class="w-full px-3 py-1.5 md:px-4 md:py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition text-xs md:text-sm"
+              >🎲 Бросить на дубль ({{ (store.players.find(p => p.id === myId)?.jailTurns || 0) }}/3)</button>
             </div>
-
           </div>
 
-          <div ref="chatContainer" class="w-full max-w-md h-96 overflow-y-auto bg-white rounded-lg p-3 text-xs font-mono space-y-1.5 border border-gray-200 shadow-inner scrollbar-thin">
+          <!-- Лог событий -->
+          <div ref="chatContainer" class="w-full max-w-md h-48 md:h-96 overflow-y-auto bg-white rounded-lg p-2 md:p-3 text-[10px] md:text-xs font-mono space-y-1 border border-gray-200 shadow-inner scrollbar-thin">
             <div v-for="(log, i) in store.logs" :key="i" class="text-gray-600 border-b border-gray-100 pb-1 last:border-0">{{ log }}</div>
           </div>
 
-          <p class="text-gray-500 text-base">Ход: <span class="font-semibold text-gray-800">{{ getPlayerName(store.currentTurn) }}</span></p>
+          <!-- Инфо о ходе -->
+          <p class="text-gray-500 text-sm md:text-base">Ход: <span class="font-semibold text-gray-800">{{ getPlayerName(store.currentTurn) }}</span></p>
 
-          <!-- 🧪 Дебаг-селект: ВСЕ тестовые сценарии -->
-          <div class="w-72 mt-1">
-            <label class="text-[10px] font-semibold text-gray-400 mb-0.5 block text-center">🧪 Тест-сценарии:</label>
-            <select v-model="debugTarget" class="w-full bg-gray-100 border border-gray-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500">
+          <!-- 🧪 Дебаг-селект -->
+          <!-- 🧪 Дебаг-селект -->
+          <div class="w-full max-w-xs mt-1">
+            <label class="text-[9px] md:text-[10px] font-semibold text-gray-400 mb-0.5 block text-center">🧪 Тест-сценарии:</label>
+            <select v-model="debugTarget" class="w-full bg-gray-100 border border-gray-300 rounded-lg px-2 py-1 text-[10px] md:text-xs focus:outline-none focus:ring-1 focus:ring-blue-500">
               <option :value="null">🎲 Случайный бросок</option>
-
-              <!-- 🃏 ШАНС (3 карты) -->
               <optgroup label="🃏 Шанс">
-                <option :value="7">🃏 Шанс #7: "Отправляйтесь на пр. Кирова"</option>
-                <option :value="22">🃏 Шанс #22: "Банковская ошибка +200₽"</option>
-                <option :value="36">🃏 Шанс #36: "Штраф за скорость -15₽"</option>
+                <option :value="7">🃏 Шанс #7</option>
+                <option :value="22">🃏 Шанс #22</option>
+                <option :value="36">🃏 Шанс #36</option>
               </optgroup>
-
-              <!-- 💰 КАЗНА (3 карты) -->
               <optgroup label="💰 Казна">
-                <option :value="2">💰 Казна #2: "Оплата врача -50₽"</option>
-                <option :value="17">💰 Казна #17: "Вклад погашен +100₽"</option>
-                <option :value="33">💰 Казна #33: "Карта 'Выход из тюрьмы'"</option>
+                <option :value="2">💰 Казна #2</option>
+                <option :value="17">💰 Казна #17</option>
+                <option :value="33">💰 Казна #33</option>
               </optgroup>
-
-              <!-- 🚔 ТЮРЬМА -->
               <optgroup label="🚔 Тюрьма">
-                <option :value="10">🔓 Просто посетить тюрьму (не сесть)</option>
-                <option :value="30">🚔 Отправиться в тюрьму (Go to Jail)</option>
+                <option :value="10">🔓 Посетить тюрьму</option>
+                <option :value="30">🚔 Go to Jail</option>
               </optgroup>
-
-              <!-- 📉 НАЛОГИ -->
               <optgroup label="📉 Налоги">
-                <option :value="4">📉 Налог на роскошь (-200₽)</option>
-                <option :value="38">📉 Подоходный налог (-100₽)</option>
+                <option :value="4">📉 Налог -200₽</option>
+                <option :value="38">📉 Налог -100₽</option>
               </optgroup>
-
-              <!-- 🚂 Ж/Д и КОММУНАЛКИ -->
               <optgroup label="🚂 Транспорт">
-                <option :value="5">🚂 Ж/Д Вокзал (200₽)</option>
-                <option :value="15">🚂 Речной Вокзал (200₽)</option>
-                <option :value="25">🚂 Автовокзал (200₽)</option>
-                <option :value="35">🚂 Аэропорт (200₽)</option>
-                <option :value="12">⚡ Водоканал (150₽)</option>
-                <option :value="28">💡 Электросети (150₽)</option>
+                <option :value="5">🚂 Вокзал 1</option>
+                <option :value="15">🚂 Вокзал 2</option>
+                <option :value="25">🚂 Вокзал 3</option>
+                <option :value="35">🚂 Вокзал 4</option>
+                <option :value="12">⚡ Водоканал</option>
+                <option :value="28">⚡ Электросети</option>
               </optgroup>
-
-              <!-- 🏠 УЛИЦЫ ПО ЦВЕТАМ -->
-              <optgroup label="🟤 Дешёвые (60-100₽)">
-                <option :value="1">🟤 Ленинградская (60₽)</option>
-                <option :value="3">🟤 Вилоновская (60₽)</option>
-                <option :value="6">🔵 пр. Кирова (100₽)</option>
-                <option :value="8">🔵 ул. Куйбышева (100₽)</option>
-                <option :value="9">🔵 ул. Молодогвардейская (120₽)</option>
+              <optgroup label="🏠 Улицы">
+                <option :value="1">🟤 Ленинградская</option>
+                <option :value="3">🟤 Вилоновская</option>
+                <option :value="6">🔵 пр. Кирова</option>
+                <option :value="8">🔵 ул. Куйбышева</option>
+                <option :value="9">🔵 ул. Молодогвардейская</option>
+                <option :value="11">🟣 ул. Купеческая</option>
+                <option :value="13">🟣 Красноармейская</option>
+                <option :value="14">🟣 Галактионовская</option>
+                <option :value="16">🟠 ул. Полевая</option>
+                <option :value="18">🟠 Братьев Коростылевых</option>
+                <option :value="19">🟠 Аэродромная</option>
+                <option :value="21">🔴 Осипенко</option>
+                <option :value="23">🔴 Садовая</option>
+                <option :value="24">🔴 Стара-Загора</option>
+                <option :value="26">🟡 пр. Ленина</option>
+                <option :value="27">🟡 Спортивная</option>
+                <option :value="29">🟡 Арцыбушевская</option>
+                <option :value="31">🟢 Фрунзе</option>
+                <option :value="32">🟢 Советской Армии</option>
+                <option :value="34">🟢 Ульяновская</option>
+                <option :value="37">🔵 Советская</option>
+                <option :value="39">🔵 Советской Армии</option>
               </optgroup>
-
-              <optgroup label="🟣 Средние (140-220₽)">
-                <option :value="11">🟣 ул. Купеческая (140₽)</option>
-                <option :value="13">🟣 Красноармейская (140₽)</option>
-                <option :value="14">🟣 Галактионовская (140₽)</option>
-                <option :value="16">🟠 ул. Полевая (180₽)</option>
-                <option :value="18">🟠 Братьев Коростылевых (180₽)</option>
-                <option :value="19">🟠 Аэродромная (200₽)</option>
-                <option :value="21">🔴 Осипенко (220₽)</option>
-                <option :value="23">🔴 Садовая (220₽)</option>
-                <option :value="24">🔴 Стара-Загора (220₽)</option>
-              </optgroup>
-
-              <optgroup label="🟢 Дорогие (260-400₽)">
-                <option :value="26">🟡 пр. Ленина (260₽)</option>
-                <option :value="27">🟡 Спортивная (260₽)</option>
-                <option :value="29">🟡 Арцыбушевская (280₽)</option>
-                <option :value="31">🟢 Фрунзе (350₽)</option>
-                <option :value="32">🟢 Советской Армии (350₽)</option>
-                <option :value="34">🟢 Ульяновская (350₽)</option>
-                <option :value="37">🔵 Советская (400₽)</option>
-                <option :value="39">🔵 Советской Армии (400₽)</option>
-              </optgroup>
-
-              <!-- 🎯 БЫСТРЫЕ СЦЕНАРИИ -->
               <optgroup label="⚡ Быстрые тесты">
-                <option :value="0">🏁 СТАРТ (+200₽ при проходе)</option>
-                <option :value="20">🅿️ Бесплатная парковка (ничего)</option>
-                <option :value="40">🔁 Полный круг (через СТАРТ)</option>
+                <option :value="0">🏁 СТАРТ (+200₽)</option>
+                <option :value="20">🅿️ Бесплатная парковка</option>
               </optgroup>
             </select>
           </div>
