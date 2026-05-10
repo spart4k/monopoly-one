@@ -19,6 +19,7 @@ export function handleBuyHouse(room: Room, playerId: string, spaceId: number, ro
   const player = room.getPlayer(playerId)
   if (!player) return { error: 'Player not found' }
   if (room.state.currentTurn !== playerId) return { error: 'Не ваш ход' }
+  if (player.isInJail) return { error: '🔒 Нельзя покупать дома в тюрьме' } // ✅
 
   const space = getSpaceById(spaceId)
   if (!space || space.type !== 'property') return { error: 'Нельзя построить здесь' }
@@ -53,6 +54,7 @@ export function handleSellHouse(room: Room, playerId: string, spaceId: number, r
   const player = room.getPlayer(playerId)
   if (!player) return { error: 'Player not found' }
   if (room.state.currentTurn !== playerId) return { error: 'Не ваш ход' }
+  if (player.isInJail) return { error: '🔒 Нельзя продавать дома в тюрьме' } // ✅
 
   const space = getSpaceById(spaceId)
   if (!space || space.type !== 'property') return { error: 'Нельзя продать' }

@@ -40,12 +40,15 @@ try {
 const canBuyHouse = computed(() => {
   if (!selectedSpace.value || selectedSpace.value.type !== 'property') return false
   const me = store.players.find(p => p.id === myId.value)
-  if (!me) return false
+  if (!me || me.isInJail) return false // 🔒 Блокируем, если в тюрьме
+
   const group = colorGroups[selectedSpace.value.color]
   if (!group || !group.every(id => me.properties.includes(id))) return false
   if (me.money < (selectedSpace.value.houseCost || 100)) return false
+
   const current = me.houses?.[selectedSpace.value.id] || 0
   if (current >= 5) return false
+
   const others = group.filter(id => id !== selectedSpace.value.id).map(id => me.houses?.[id] || 0)
   const minOthers = others.length ? Math.min(...others) : 0
   return current <= minOthers && !boughtHouseThisTurn.value
@@ -54,11 +57,14 @@ const canBuyHouse = computed(() => {
 const canSellHouse = computed(() => {
   if (!selectedSpace.value || selectedSpace.value.type !== 'property') return false
   const me = store.players.find(p => p.id === myId.value)
-  if (!me) return false
+  if (!me || me.isInJail) return false // 🔒 Блокируем, если в тюрьме
+
   const group = colorGroups[selectedSpace.value.color]
   if (!group || !group.every(id => me.properties.includes(id))) return false
+
   const current = me.houses?.[selectedSpace.value.id] || 0
   if (current === 0) return false
+
   const others = group.filter(id => id !== selectedSpace.value.id).map(id => me.houses?.[id] || 0)
   const maxOthers = others.length ? Math.max(...others) : 0
   return current >= maxOthers
