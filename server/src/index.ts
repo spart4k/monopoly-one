@@ -6,6 +6,7 @@ import { RoomManager } from './rooms/RoomManager'
 import { handleRollDice } from './events/handlers/rollDice'
 import { handleBuyProperty, handlePassAction } from './events/handlers/buyProperty'
 import { handlePayJailFine, useJailCard } from './events/handlers/jailAction'
+import { handleBuyHouse, handleSellHouse } from './events/handlers/buildHouse'
 
 const fastify = Fastify({ logger: false })
 const roomManager = new RoomManager()
@@ -24,6 +25,19 @@ function broadcastLobbyUpdate() {
   for (const sock of allSockets) if (sock.readyState === 1) sock.send(msg)
 }
 
+// 📦 Формирование payload с houses
+function toPayload(room: any) {
+  return {
+    status: room.state.status,
+    players: room.state.players.map((p:any)=>({
+      id:p.id,name:p.name,color:p.color,pos:p.pos,money:p.money,properties:p.properties,
+      houses: p.houses || {}, // 🔑 Передаем дома
+      isInJail:p.isInJail,jailTurns:p.jailTurns,jailCards:p.jailCards,consecutiveDoubles:p.consecutiveDoubles,isReady:p.isReady
+    })),
+    currentTurn: room.state.currentTurn, logs: room.state.logs, lastDice: room.state.lastDice
+  }
+}
+
 async function handleEvent(msg: string, socket: any) {
   try {
     const event = JSON.parse(msg)
@@ -35,11 +49,7 @@ async function handleEvent(msg: string, socket: any) {
       const r = Array.from(roomManager.activeRooms.values()).find(r => r.id === roomId)
       if (r?.state.status === 'LOBBY') {
         const p = r.getPlayer(playerId)
-        if (p && r.state.players[0]?.id !== playerId) {
-          p.isReady = event.isReady !== false
-          broadcastLobbyUpdate()
-          console.log(`✅ [READY] ${p.name} -> ${p.isReady}`)
-        }
+        if (p && r.state.players[0]?.id !== playerId) { p.isReady = event.isReady !== false; broadcastLobbyUpdate() }
       }
       return
     }
@@ -53,48 +63,33 @@ async function handleEvent(msg: string, socket: any) {
       if (!room) return socket.send(JSON.stringify({ type: 'ERROR', message: 'Player not found' }))
     }
 
-    const toPayload = () => ({
-      status: room.state.status,
-      players: room.state.players.map((p:any)=>({id:p.id,name:p.name,color:p.color,pos:p.pos,money:p.money,properties:p.properties,isInJail:p.isInJail,jailTurns:p.jailTurns,jailCards:p.jailCards,consecutiveDoubles:p.consecutiveDoubles,isReady:p.isReady})),
-      currentTurn: room.state.currentTurn, logs: room.state.logs, lastDice: room.state.lastDice
-    })
-
     if (type === 'JOIN_ROOM') {
       let player = room.getPlayer(playerId)
-      if (!player) {
-        player = room.addPlayer({ id: playerId, name, color: room.getNextColor(), pos: 0, money: 1500 })
-        room.addLog(`👤 ${name} присоединился`)
-      }
+      if (!player) { player = room.addPlayer({ id: playerId, name, color: room.getNextColor(), pos: 0, money: 1500 }); room.addLog(`👤 ${name} присоединился`) }
       room.addSocket(playerId, socket)
       broadcastLobbyUpdate()
-      for (const [_, s] of room.getSockets()) if (s.readyState === 1) s.send(JSON.stringify({ type: 'SYNC_STATE', payload: toPayload() }))
+      for (const [_, s] of room.getSockets()) if (s.readyState === 1) s.send(JSON.stringify({ type: 'SYNC_STATE', payload: toPayload(room) }))
       return
     }
 
     if (type === 'START_GAME') {
       if (room.state.players[0]?.id !== playerId) return socket.send(JSON.stringify({ type: 'ERROR', message: 'Только создатель' }))
-      if (room.state.status !== 'LOBBY') return socket.send(JSON.stringify({ type: 'ERROR', message: 'Уже запущена' }))
-      if (room.playerCount < 2) return socket.send(JSON.stringify({ type: 'ERROR', message: 'Нужно 2+ игрока' }))
-
-      // 🔑 Проверка готовности всех гостей
+      if (room.state.status !== 'LOBBY' || room.playerCount < 2) return socket.send(JSON.stringify({ type: 'ERROR', message: 'Нужно 2+ игрока в лобби' }))
       const allReady = room.state.players.every(p => p.isReady || p.id === room.state.players[0]?.id)
       if (!allReady) return socket.send(JSON.stringify({ type: 'ERROR', message: 'Не все игроки нажали "Готов"' }))
-
-      room.startGame()
-      broadcastLobbyUpdate()
-      for (const [_, s] of room.getSockets()) if (s.readyState === 1) s.send(JSON.stringify({ type: 'SYNC_STATE', payload: toPayload() }))
-      console.log(`🎮 Game started in ${room.id}`)
+      room.startGame(); broadcastLobbyUpdate()
+      for (const [_, s] of room.getSockets()) if (s.readyState === 1) s.send(JSON.stringify({ type: 'SYNC_STATE', payload: toPayload(room) }))
       return
     }
 
-    if (type === 'ROLL_DICE') {
-      const res = handleRollDice(room, playerId, roomManager.getAllRoomViews(), event.targetSpaceId)
-      if (res?.error) socket.send(JSON.stringify({ type: 'ERROR', message: res.error }))
-      return
-    }
+    if (type === 'ROLL_DICE') { const r = handleRollDice(room, playerId, roomManager.getAllRoomViews(), event.targetSpaceId); if(r?.error) socket.send(JSON.stringify({type:'ERROR',message:r.error})); return }
     if (type === 'BUY_PROPERTY') { const r = handleBuyProperty(room, playerId, spaceId, roomManager.getAllRoomViews()); if(r?.error) socket.send(JSON.stringify({type:'ERROR',message:r.error})); return }
     if (type === 'PASS_ACTION') { const r = handlePassAction(room, playerId, roomManager.getAllRoomViews()); if(r?.error) socket.send(JSON.stringify({type:'ERROR',message:r.error})); return }
     if (type === 'PAY_JAIL_FINE' || type === 'USE_JAIL_CARD') { const fn = type === 'PAY_JAIL_FINE' ? handlePayJailFine : useJailCard; const r = fn(room, playerId, roomManager.getAllRoomViews()); if(r?.error) socket.send(JSON.stringify({type:'ERROR',message:r.error})); return }
+
+    // 🏠 Дома и отели
+    if (type === 'BUY_HOUSE') { const r = handleBuyHouse(room, playerId, spaceId, roomManager.getAllRoomViews()); if(r?.error) socket.send(JSON.stringify({type:'ERROR',message:r.error})); return }
+    if (type === 'SELL_HOUSE') { const r = handleSellHouse(room, playerId, spaceId, roomManager.getAllRoomViews()); if(r?.error) socket.send(JSON.stringify({type:'ERROR',message:r.error})); return }
 
   } catch (e: any) {
     console.error(`💥 [EV] CRASH: ${e?.message}`)
@@ -105,9 +100,7 @@ async function handleEvent(msg: string, socket: any) {
 fastify.register(async (server) => {
   server.get('/ws', { websocket: true }, (connection, req) => {
     const socket = connection.socket
-    allSockets.add(socket)
-    broadcastLobbyUpdate()
-
+    allSockets.add(socket); broadcastLobbyUpdate()
     socket.on('message', async (raw) => {
       let msg = raw instanceof Buffer ? raw.toString('utf8') : typeof raw === 'string' ? raw : ''
       if (msg) await handleEvent(msg, socket)

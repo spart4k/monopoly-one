@@ -13,34 +13,44 @@ const props = defineProps<{
   myMoney?: number
   isPropertyOwned?: boolean
   ownerName?: string
+  isMyProperty?: boolean
+  currentHouseCount?: number
+  canBuyHouse?: boolean
+  canSellHouse?: boolean
 }>()
 
 const emit = defineEmits<{
   close: []
   buy: []
   pass: []
+  buyHouse: []
+  sellHouse: []
+  rollForJail: []
+  payJailFine: []
+  useJailCard: []
 }>()
 
 const isProperty = computed(() =>
     props.space?.type === 'property' || props.space?.type === 'railroad'
 )
-
 const isCardAction = computed(() =>
     store.pendingAction === 'CARD' && store.pendingCardText
 )
-
+const isInfoAction = computed(() =>
+    store.pendingAction === 'INFO' && store.pendingInfo
+)
 const canAfford = computed(() =>
     props.myMoney !== undefined &&
     props.space?.price !== undefined &&
     props.myMoney >= props.space.price
 )
-
-const houseLabels = ['1 дом', '2 дома', '3 дома', '4 дома']
-const isInfoAction = computed(() => store.pendingAction === 'INFO' && store.pendingInfo)
-
-const isJailAction = computed(() =>
-    store.players.find(p => p.id === store.currentTurn)?.isInJail && store.currentTurn === myId.value
+const currentPlayer = computed(() =>
+    store.players.find(p => p.id === store.currentTurn)
 )
+const isJailAction = computed(() =>
+    currentPlayer.value?.isInJail && store.pendingAction === 'INFO'
+)
+const houseLabels = ['1 дом', '2 дома', '3 дома', '4 дома']
 </script>
 
 <template>
@@ -51,41 +61,51 @@ const isJailAction = computed(() =>
           class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
           @click.self="emit('close')"
       >
-        <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden">
-          <!-- 🔷 Шапка -->
+        <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden flex flex-col max-h-[90vh]">
+
+          <!-- Шапка -->
           <div
-              class="p-4 text-white relative"
-              :class="[space.color, space.textColor === 'text-gray-900' ? 'text-gray-900' : 'text-white']"
+              class="p-4 text-white relative shrink-0"
+              :class="[space.color || 'bg-gray-500', space.textColor === 'text-gray-900' ? 'text-gray-900' : 'text-white']"
           >
-            <button @click="emit('close')" class="absolute top-3 right-3 opacity-70 hover:opacity-100 transition">✕</button>
+            <button @click="emit('close')" class="absolute top-3 right-3 opacity-70 hover:opacity-100 transition text-xl leading-none">✕</button>
             <h3 class="text-xl font-bold">{{ space.name }}</h3>
             <span class="text-xs opacity-80 uppercase tracking-wider">{{ space.type }}</span>
           </div>
 
-          <!-- 🔶 Тело -->
-          <div class="p-4 space-y-4 text-gray-700">
-            <!-- Описание (налоги, коммуналки) -->
-            <div v-if="space.description && !isCardAction" class="text-sm bg-gray-100 p-2 rounded italic">
-              {{ space.description }}
-            </div>
+          <!-- Тело -->
+          <div class="p-4 space-y-4 text-gray-700 overflow-y-auto">
 
-            <!-- 🃏 Карта Шанс / Казна -->
+            <!-- Карта -->
             <div v-if="isCardAction" class="text-center py-6 space-y-3 bg-orange-50 rounded-lg border border-orange-200">
               <div class="text-4xl">🃏</div>
               <p class="text-lg font-medium text-gray-800 leading-snug">{{ store.pendingCardText }}</p>
             </div>
 
-            <!-- 🏠 Недвижимость -->
-            <div v-else-if="isProperty" class="space-y-3">
-              <!-- Статус владения -->
-              <div v-if="isPropertyOwned" class="p-3 bg-green-50 border border-green-200 rounded-lg">
-                <div class="flex items-center gap-2 text-green-700 font-semibold">
-                  <span>✅</span>
-                  <span>Принадлежит: {{ ownerName || 'Игроку' }}</span>
+            <!-- Инфо / Тюрьма -->
+            <div v-else-if="isInfoAction" class="text-center py-6 space-y-4">
+              <div v-if="isJailAction" class="text-5xl">🔒</div>
+              <div v-else class="text-6xl">{{ store.pendingInfo?.icon }}</div>
+              <h3 class="text-2xl font-bold text-gray-800">{{ isJailAction ? 'Вы в тюрьме' : store.pendingInfo?.title }}</h3>
+              <p class="text-gray-600 text-lg leading-relaxed">
+                {{ isJailAction ? `Попыток осталось: ${currentPlayer?.jailTurns ?? 0}/3` : store.pendingInfo?.message }}
+              </p>
+            </div>
+
+            <!-- Недвижимость -->
+            <div v-else-if="isProperty" class="space-y-4">
+              <!-- Владение -->
+              <div v-if="isPropertyOwned" class="p-3 rounded-lg border" :class="isMyProperty ? 'bg-green-50 border-green-200 text-green-700' : 'bg-blue-50 border-blue-200 text-blue-700'">
+                <div class="flex items-center gap-2 font-semibold">
+                  <span>{{ isMyProperty ? '✅' : '🔑' }}</span>
+                  <span>{{ isMyProperty ? 'Ваша собственность' : `Владелец: ${ownerName || 'Игрок'}` }}</span>
+                </div>
+                <div v-if="isMyProperty && currentHouseCount !== undefined" class="text-sm mt-1 pl-6">
+                  Зданий: {{ currentHouseCount === 0 ? 'Нет' : currentHouseCount === 5 ? '🏨 Отель' : `🏠 ${currentHouseCount}/4` }}
                 </div>
               </div>
 
-              <!-- Предложение купить -->
+              <!-- Покупка -->
               <div v-else-if="actionRequired && space.price > 0" class="p-3 bg-blue-50 border border-blue-200 rounded-lg space-y-2">
                 <div class="flex justify-between items-center">
                   <span class="font-semibold">Купить за:</span>
@@ -96,7 +116,7 @@ const isJailAction = computed(() =>
                 </div>
               </div>
 
-              <!-- Таблица аренды -->
+              <!-- Аренда -->
               <div class="border-t pt-3">
                 <h4 class="font-semibold mb-2">Аренда:</h4>
                 <table class="w-full text-sm">
@@ -104,74 +124,65 @@ const isJailAction = computed(() =>
                     <td class="py-1">Базовая</td>
                     <td class="text-right font-mono">{{ space.baseRent }}₽</td>
                   </tr>
-                  <tr v-for="(rent, i) in space.rentWithHouse" :key="i" class="border-b">
+                  <tr v-if="space.rentWithHouse" v-for="(rent, i) in space.rentWithHouse" :key="i" class="border-b">
                     <td class="py-1">{{ houseLabels[i] }}</td>
                     <td class="text-right font-mono">{{ rent }}₽</td>
                   </tr>
-                  <tr class="font-bold text-blue-600">
+                  <tr v-if="space.rentWithHotel" class="font-bold text-blue-600">
                     <td class="py-2">С отелем</td>
                     <td class="text-right font-mono">{{ space.rentWithHotel }}₽</td>
                   </tr>
                 </table>
               </div>
 
-              <!-- Доп. инфо -->
-              <div class="flex justify-between text-sm text-gray-500 pt-2 border-t">
-                <span>Стоимость дома</span>
-                <span class="font-mono">{{ space.houseCost }}₽</span>
-              </div>
-              <div class="flex justify-between text-sm text-gray-500">
-                <span>Залог</span>
-                <span class="font-mono">{{ space.mortgageValue }}₽</span>
+              <!-- Дома -->
+              <div v-if="isMyProperty && space.type === 'property'" class="pt-2 border-t space-y-2">
+                <div class="flex justify-between text-sm text-gray-500">
+                  <span>Стоимость дома</span>
+                  <span class="font-mono">{{ space.houseCost }}₽</span>
+                </div>
+                <div class="flex gap-2">
+                  <button @click="emit('buyHouse')" :disabled="!canBuyHouse" class="flex-1 px-2 py-1.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white text-xs rounded-lg transition">🏠 Купить</button>
+                  <button @click="emit('sellHouse')" :disabled="!canSellHouse" class="flex-1 px-2 py-1.5 bg-red-600 hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white text-xs rounded-lg transition">💰 Продать</button>
+                </div>
               </div>
             </div>
 
-            <!-- ℹ️ Прочие клетки -->
+            <!-- Прочее -->
             <div v-else class="text-center py-4 text-gray-500">
               <span v-if="space.type === 'tax'">📉 Заплатите налог</span>
+              <span v-else-if="space.type === 'go'">🏁 СТАРТ</span>
               <span v-else>ℹ️ Информационное поле</span>
             </div>
           </div>
 
-          <!-- 📜 INFO модалка -->
-          <div v-if="isInfoAction" class="text-center py-8 space-y-4">
-            <div class="text-6xl mb-2">{{ store.pendingInfo?.icon }}</div>
-            <h3 class="text-2xl font-bold text-gray-800">{{ store.pendingInfo?.title }}</h3>
-            <p class="text-gray-600 text-lg leading-relaxed max-w-xs mx-auto">{{ store.pendingInfo?.message }}</p>
-          </div>
-
-          <!-- 🔒 Модалка тюрьмы -->
-          <div v-if="isJailAction" class="text-center py-6 space-y-4 bg-red-50 rounded-lg border border-red-200">
-            <div class="text-5xl">🔒</div>
-            <h3 class="text-xl font-bold text-gray-800">Вы в тюрьме</h3>
-            <p class="text-gray-600">Попыток осталось: {{ store.currentPlayer?.jailTurns ?? 0 }}/3</p>
-          </div>
-
-          <!-- 🔻 Футер с кнопками -->
-          <div class="p-4 bg-gray-50 flex gap-3 border-t">
+          <!-- Футер -->
+          <div class="p-4 bg-gray-50 flex flex-col gap-2 border-t shrink-0">
+            <!-- Тюрьма -->
             <div v-if="isJailAction" class="flex gap-2">
-              <button @click="emit('rollForJail')" class="flex-1 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg">🎲 Бросить (дубль)</button>
-              <button @click="emit('payJailFine')" :disabled="(store.players.find(p=>p.id===store.currentTurn)?.money || 0) < 50" class="flex-1 px-3 py-2 bg-yellow-500 hover:bg-yellow-600 disabled:bg-gray-400 text-white font-semibold rounded-lg">💸 Заплатить 50₽</button>
-              <button @click="emit('useJailCard')" :disabled="(store.players.find(p=>p.id===store.currentTurn)?.jailCards || 0) < 1" class="flex-1 px-3 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 text-white font-semibold rounded-lg">🎫 Карта</button>
+              <button @click="emit('rollForJail')" class="flex-1 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg">🎲 Бросить</button>
+              <button @click="emit('payJailFine')" :disabled="(currentPlayer?.money || 0) < 50" class="flex-1 px-3 py-2 bg-yellow-500 hover:bg-yellow-600 disabled:bg-gray-400 text-white font-semibold rounded-lg">💸 50₽</button>
+              <button @click="emit('useJailCard')" :disabled="(currentPlayer?.jailCards || 0) < 1" class="flex-1 px-3 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 text-white font-semibold rounded-lg">🎫 Карта</button>
             </div>
 
-            <!-- Купить -->
-            <button
-                v-if="actionRequired && space.price > 0 && !isPropertyOwned"
-                @click="emit('buy')" :disabled="!canAfford"
-                class="flex-1 px-4 py-2.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-semibold rounded-lg transition shadow-sm"
-            >Купить за {{ space.price }}₽</button>
+            <!-- Обычные кнопки -->
+            <div v-else class="flex gap-3">
+              <button
+                  v-if="actionRequired && space.price > 0 && !isPropertyOwned"
+                  @click="emit('buy')" :disabled="!canAfford"
+                  class="flex-1 px-4 py-2.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-semibold rounded-lg transition"
+              >Купить за {{ space.price }}₽</button>
 
-            <!-- Пропустить / Продолжить -->
-            <button
-                v-if="actionRequired"
-                @click="emit('pass')"
-                class="flex-1 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition shadow-sm"
-            >{{ isCardAction || isInfoAction ? 'Продолжить' : 'Пропустить' }}</button>
+              <button
+                  v-if="actionRequired || isPropertyOwned"
+                  @click="emit('pass')"
+                  class="flex-1 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition"
+              >{{ isCardAction || isInfoAction ? 'Продолжить' : 'Пропустить' }}</button>
 
-            <!-- Закрыть (если действие не требуется) -->
-            <button v-else @click="emit('close')" class="flex-1 px-4 py-2.5 bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold rounded-lg transition shadow-sm">Закрыть</button>
+              <button v-else @click="emit('close')" class="flex-1 px-4 py-2.5 bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold rounded-lg transition">Закрыть</button>
+            </div>
           </div>
+
         </div>
       </div>
     </Transition>

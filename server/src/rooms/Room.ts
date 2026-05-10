@@ -9,11 +9,12 @@ export type Player = {
   pos: number
   money: number
   properties: number[]
+  houses: Record<number, number> // 🔑 0-4 дома, 5 отель
   isInJail: boolean
   jailTurns: number
   jailCards: number
   consecutiveDoubles: number
-  isReady: boolean // 🔑 NEW
+  isReady: boolean
 }
 
 export type RoomState = {
@@ -43,11 +44,11 @@ export class Room {
   get playerCount() { return this.state.players.length }
   getNextColor() { return CONSTANTS.COLORS[this.state.players.length % CONSTANTS.COLORS.length] }
 
-  addPlayer(p: Omit<Player, 'properties' | 'isInJail' | 'jailTurns' | 'jailCards' | 'consecutiveDoubles' | 'isReady'>) {
+  addPlayer(p: Omit<Player, 'properties' | 'houses' | 'isInJail' | 'jailTurns' | 'jailCards' | 'consecutiveDoubles' | 'isReady'>) {
     const isFirst = this.state.players.length === 0
     const newP: Player = {
-      ...p, properties: [], isInJail: false, jailTurns: 0, jailCards: 0,
-      consecutiveDoubles: 0, isReady: isFirst // 🔑 Хост сразу "готов"
+      ...p, properties: [], houses: {}, isInJail: false, jailTurns: 0, jailCards: 0,
+      consecutiveDoubles: 0, isReady: isFirst
     }
     this.state.players.push(newP)
     return newP
@@ -64,6 +65,8 @@ export class Room {
 
   startGame() {
     if (this.state.players.length < 2) return false
+    this.state.actionPending = 'NONE'
+    this.state.lastRollWasDouble = false
     this.state.status = 'PLAYING'
     this.state.currentTurn = this.state.players[0].id
     this.addLog('🎮 Игра началась!')

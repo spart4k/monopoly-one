@@ -15,6 +15,7 @@ export function handleRollDice(room: Room, playerId: string, roomViews: Map<stri
   }
 
   // 🚔 ЛОГИКА ТЮРЬМЫ (вместо блокировки)
+  // 🚔 ЛОГИКА ТЮРЬМЫ (в начале handleRollDice)
   if (player.isInJail) {
     let dice: [number, number] = [Math.ceil(Math.random() * 6), Math.ceil(Math.random() * 6)]
     room.state.lastDice = dice
@@ -106,6 +107,8 @@ export function handleRollDice(room: Room, playerId: string, roomViews: Map<stri
       broadcast(roomViews, room.id, { type: 'OFFER_BUY', playerId, spaceId: space.id, price: space.price, name: space.name })
     } else if (owner.id !== playerId) {
       let rent = 0
+      const houseCount = owner.houses?.[space.id] || 0
+
       if (space.type === 'railroad') {
         const rrCount = owner.properties.filter(id => [5,15,25,35].includes(id)).length
         rent = 25 * Math.pow(2, rrCount - 1)
@@ -113,16 +116,21 @@ export function handleRollDice(room: Room, playerId: string, roomViews: Map<stri
         const utilCount = owner.properties.filter(id => [12,28].includes(id)).length
         rent = (dice[0]+dice[1]) * (utilCount === 2 ? 10 : 4)
       } else {
-        rent = space.baseRent
+        // 🔑 Аренда с учётом домов/отелей
+        if (houseCount === 0) rent = space.baseRent
+        else if (houseCount <= 4 && space.rentWithHouse) rent = space.rentWithHouse[houseCount - 1]
+        else if (houseCount === 5) rent = space.rentWithHotel || space.baseRent * 10
       }
+
       if (rent > 0) {
         const paid = Math.min(player.money, rent)
         owner.money += paid
         player.money -= paid
-        room.addLog(`💸 ${player.name} заплатил ${paid}₽ аренды`)
+        const label = houseCount > 0 ? (houseCount === 5 ? '🏨 Отель' : `🏠 Дом ${houseCount}`) : ''
+        room.addLog(`💸 ${player.name} заплатил ${paid}₽ аренды ${space.name} ${label}`)
         room.state.actionPending = 'INFO'
         actionRequired = true
-        broadcast(roomViews, room.id, { type: 'ACTION_REQUIRED', title: '💸 Аренда', message: `Вы заплатили ${paid}₽`, icon: '💸' })
+        broadcast(roomViews, room.id, { type: 'ACTION_REQUIRED', title: '💸 Аренда', message: `Вы заплатили ${paid}₽ ${label ? 'за ' + label : ''}`, icon: '💸' })
       }
     }
   }
@@ -154,19 +162,33 @@ export function handleRollDice(room: Room, playerId: string, roomViews: Map<stri
   // 🔄 Обработка дублей (если нет обязательного действия)
   if (!actionRequired) {
     if (isDouble) {
-      player.consecutiveDoubles++
+      player.consecutiveDoubles++; // Копим счётчик, НЕ сбрасываем при actionRequired
       if (player.consecutiveDoubles >= 3) {
-        player.pos = 10; player.isInJail = true; player.jailTurns = 0; player.consecutiveDoubles = 0
-        room.addLog(`🚔 ${player.name} выбросил 3 дубля подряд → Тюрьма!`)
-        broadcast(roomViews, room.id, { type: 'GO_TO_JAIL', playerId })
-        room.finishTurn()
+        // 3 дубля подряд → Тюрьма (срабатывает мгновенно, даже если висит покупка)
+        player.pos = 10; player.isInJail = true; player.jailTurns = 0; player.consecutiveDoubles = 0;
+        room.addLog(`🚔 ${player.name} выбросил 3 дубля подряд → Тюрьма!`);
+        broadcast(roomViews, room.id, { type: 'GO_TO_JAIL', playerId });
+        room.finishTurn();
       } else {
-        room.state.actionPending = 'DOUBLE_TURN'
-        broadcast(roomViews, room.id, { type: 'DOUBLE_ROLLED', playerId })
+        // 1 или 2 дубля → оставляем ход у игрока
+        // Если уже висит действие (BUY/INFO), не меняем его. Иначе ставим DOUBLE_TURN
+        if (!actionRequired) {
+          room.state.actionPending = 'DOUBLE_TURN';
+          broadcast(roomViews, room.id, { type: 'DOUBLE_ROLLED', playerId });
+        }
       }
     } else {
-      player.consecutiveDoubles = 0
-      room.finishTurn()
+      // Не дубль → сбрасываем счётчик и передаём ход (если нет другого действия)
+      player.consecutiveDoubles = 0;
+      if (!actionRequired) {
+        room.finishTurn();
+      }
+    }
+
+    // 📡 Рассылка движения и стейта
+    broadcast(roomViews, room.id, { type: 'PLAYER_MOVED', playerId, from: oldPos, to: player.pos, dice })
+    if (!actionRequired || room.state.actionPending === 'NONE') {
+      broadcast(roomViews, room.id, { type: 'SYNC_STATE', payload: buildSyncPayload(room.state) })
     }
   } else {
     player.consecutiveDoubles = 0
