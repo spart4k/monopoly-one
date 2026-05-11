@@ -38,18 +38,25 @@ function toPayload(room: any) {
   }
 }
 
+// server/src/index.ts (замени только handleEvent)
 async function handleEvent(msg: string, socket: any) {
   try {
     const event = JSON.parse(msg)
     const { type, playerId, name, roomId, spaceId } = event
-    let room: ReturnType<RoomManager['getRoom']>
 
+    console.log(`\n📥 [EV] INCOMING: ${type} | Player: ${playerId} | Room: ${roomId}`)
+
+    let room: ReturnType<RoomManager['getRoom']>
     if (type === 'GET_LOBBY') { broadcastLobbyUpdate(); return }
     if (type === 'SET_READY') {
       const r = Array.from(roomManager.activeRooms.values()).find(r => r.id === roomId)
       if (r?.state.status === 'LOBBY') {
         const p = r.getPlayer(playerId)
-        if (p && r.state.players[0]?.id !== playerId) { p.isReady = event.isReady !== false; broadcastLobbyUpdate() }
+        if (p && r.state.players[0]?.id !== playerId) {
+          p.isReady = event.isReady !== false
+          console.log(`✅ [READY] ${p.name} -> ${p.isReady}`)
+          broadcastLobbyUpdate()
+        }
       }
       return
     }
@@ -62,6 +69,9 @@ async function handleEvent(msg: string, socket: any) {
       room = Array.from(roomManager.activeRooms.values()).find(r => r.getPlayer(playerId))
       if (!room) return socket.send(JSON.stringify({ type: 'ERROR', message: 'Player not found' }))
     }
+
+    // Контекст перед обработкой
+    console.log(`📊 [CTX] Turn: ${room.state.currentTurn} | Pending: ${room.state.actionPending} | LastDouble: ${room.state.lastRollWasDouble} | Status: ${room.state.status}`)
 
     if (type === 'JOIN_ROOM') {
       let player = room.getPlayer(playerId)
@@ -86,8 +96,6 @@ async function handleEvent(msg: string, socket: any) {
     if (type === 'BUY_PROPERTY') { const r = handleBuyProperty(room, playerId, spaceId, roomManager.getAllRoomViews()); if(r?.error) socket.send(JSON.stringify({type:'ERROR',message:r.error})); return }
     if (type === 'PASS_ACTION') { const r = handlePassAction(room, playerId, roomManager.getAllRoomViews()); if(r?.error) socket.send(JSON.stringify({type:'ERROR',message:r.error})); return }
     if (type === 'PAY_JAIL_FINE' || type === 'USE_JAIL_CARD') { const fn = type === 'PAY_JAIL_FINE' ? handlePayJailFine : useJailCard; const r = fn(room, playerId, roomManager.getAllRoomViews()); if(r?.error) socket.send(JSON.stringify({type:'ERROR',message:r.error})); return }
-
-    // 🏠 Дома и отели
     if (type === 'BUY_HOUSE') { const r = handleBuyHouse(room, playerId, spaceId, roomManager.getAllRoomViews()); if(r?.error) socket.send(JSON.stringify({type:'ERROR',message:r.error})); return }
     if (type === 'SELL_HOUSE') { const r = handleSellHouse(room, playerId, spaceId, roomManager.getAllRoomViews()); if(r?.error) socket.send(JSON.stringify({type:'ERROR',message:r.error})); return }
 

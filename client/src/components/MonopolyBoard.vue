@@ -20,6 +20,32 @@ const isInJail = computed(() => currentPlayer.value?.isInJail || false)
 const hoveredOwnerId = ref<string | null>(null)
 const hoveredGroupColor = ref<string | null>(null)
 const selectedSpace = ref<ISpaceData | null>(null)
+
+watch(
+    [() => store.pendingAction, () => store.selectedSpaceId, () => store.pendingCard],
+    ([action, spaceId, card]) => {
+      // 👈 ГЛАВНЫЙ ФИКС: модалки открываются ТОЛЬКО у того, чей сейчас ход
+      if (!isMyTurn.value) return
+
+      if (action === 'BUY' && spaceId !== null && spaceId !== -1) {
+        const data = getSpaceById(spaceId)
+        if (data) { selectedSpace.value = data; showModal.value = true }
+      } else if (action === 'INFO') {
+        showModal.value = true
+      } else if (action === 'CARD' && card) {
+        showModal.value = true
+      }
+    }
+)
+
+// При смене хода закрываем модалку и чистим локальный UI-стейт
+watch(() => store.currentTurn, (newTurn, oldTurn) => {
+  if (oldTurn && oldTurn !== newTurn) {
+    showModal.value = false
+    store.clearPendingAction()
+  }
+})
+
 const showModal = ref(false)
 const debugTarget = ref<number | null>(null)
 const chatContainer = ref<HTMLElement | null>(null)
@@ -221,18 +247,21 @@ watch(() => store.logs.length, async () => {
             <button
                 @click="rollDice"
                 :disabled="
-                  store.status !== 'PLAYING' ||
-                  !isMyTurn ||
-                  (store.pendingAction !== null && store.pendingAction !== 'DOUBLE_TURN') ||
-                  (isInJail && !store.pendingAction) ||
-                  !isWsReady()
-                "
+                store.status !== 'PLAYING' ||
+                !isMyTurn ||
+                (store.pendingAction !== null && store.pendingAction !== 'DOUBLE_TURN') ||
+                (isInJail && !store.pendingAction) ||
+                !isWsReady()
+              "
                 class="w-full px-4 md:px-5 py-2.5 md:py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-semibold rounded-xl transition active:scale-95 shadow-lg text-base md:text-lg flex items-center justify-center gap-2"
             >
-              <span v-if="store.pendingAction === 'DOUBLE_TURN' && isMyTurn">🎲 Бросить снова (дубль)!</span>
-              <span v-else-if="isInJail && isMyTurn && !store.pendingAction">🔒 Вы в тюрьме</span>
-              <span v-else-if="store.pendingAction !== null">⏳ {{ getPendingText() }}</span>
-              <span v-else-if="isMyTurn">🎲 Бросить кубики</span>
+            <span v-if="isMyTurn">
+              <template v-if="store.pendingAction === 'DOUBLE_TURN'">🎲 Бросить снова (дубль)!</template>
+              <template v-else-if="isInJail && !store.pendingAction">🔒 Вы в тюрьме</template>
+              <template v-else-if="store.pendingAction !== null">⏳ {{ getPendingText() }}</template>
+              <template v-else>🎲 Бросить кубики</template>
+            </span>
+              <!-- 🔑 ИСПРАВЛЕНО: если ход не мой, ВСЕГДА показываем ожидание, игнорируя pendingAction -->
               <span v-else>⏳ Ждите хода: {{ getPlayerName(store.currentTurn) }}</span>
             </button>
 

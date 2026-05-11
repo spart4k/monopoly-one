@@ -12,42 +12,56 @@ export const useGameStore = defineStore('game', () => {
 
   const pendingAction = ref<'BUY' | 'CARD' | 'INFO' | 'DOUBLE_TURN' | null>(null)
   const selectedSpaceId = ref<number | null>(null)
-  const pendingCardText = ref<string | null>(null)
   const pendingInfo = ref<any>(null)
+  // 🔑 Новый объект для карт
+  const pendingCard = ref<{ text: string; action: string; amount?: number } | null>(null)
 
   function applyEvent(event: any) {
     if (!event?.type) return
     try {
       switch (event.type) {
-        case 'ROOMS_LIST':
-          availableRooms.value = event.rooms || []
-          break
-        case 'SYNC_STATE': {
-          console.log('🔄 STORE: SYNC_STATE received | status:', event.payload?.status) // 🔍 Дебаг
-          if (!event.payload) break
-          status.value = event.payload.status
-          currentTurn.value = event.payload.currentTurn
+        case 'ROOMS_LIST': availableRooms.value = event.rooms || []; break
+        case 'SYNC_STATE':
+          if (!event.payload) return
+          status.value = event.payload.status || 'LOBBY'
+          currentTurn.value = event.payload.currentTurn || ''
           players.value = event.payload.players || []
           if (event.payload.lastDice) lastDice.value = event.payload.lastDice
-          if (event.payload.logs) logs.value.splice(0, logs.value.length, ...event.payload.logs.slice(-50))
-          pendingAction.value = null; pendingCardText.value = null; pendingInfo.value = null
+          if (Array.isArray(event.payload.logs)) logs.value.splice(0, logs.value.length, ...event.payload.logs.slice(-50))
           break
-        }
         case 'PLAYER_MOVED':
-          lastDice.value = event.dice || [0,0]
-          const p = players.value.find((pl:any)=>pl.id===event.playerId)
-          if(p) p.pos = event.to
+          lastDice.value = event.dice || [0, 0]
+          const p = players.value.find((pl: any) => pl.id === event.playerId)
+          if (p) p.pos = event.to
           break
-        case 'CARD_DRAWN': pendingCardText.value = event.text || 'Карта вытянута'; pendingAction.value = 'CARD'; selectedSpaceId.value = -1; break
-        case 'OFFER_BUY': pendingAction.value = 'BUY'; selectedSpaceId.value = event.spaceId; break
-        case 'ACTION_REQUIRED': pendingAction.value = 'INFO'; pendingInfo.value = event; break
+        case 'CARD_DRAWN':
+          pendingCard.value = event.card || { text: 'Карта вытянута', action: 'move' }
+          pendingAction.value = 'CARD'
+          break
+        case 'OFFER_BUY':
+          pendingAction.value = 'BUY'
+          selectedSpaceId.value = event.spaceId
+          break
+        case 'ACTION_REQUIRED':
+          pendingAction.value = 'INFO'
+          pendingInfo.value = event
+          break
         case 'DOUBLE_ROLLED': pendingAction.value = 'DOUBLE_TURN'; break
         case 'ERROR': console.warn('⚠️ STORE ERROR:', event.message); logs.value.unshift(`❌ ${event.message}`); break
       }
     } catch (err) { console.error('💥 STORE applyEvent crash:', err) }
   }
 
-  function clearPendingAction() { pendingAction.value = null; selectedSpaceId.value = null; pendingCardText.value = null; pendingInfo.value = null }
+  function clearPendingAction() {
+    pendingAction.value = null
+    selectedSpaceId.value = null
+    pendingInfo.value = null
+    pendingCard.value = null
+  }
 
-  return { status, currentTurn, players, logs, availableRooms, lastDice, pendingAction, selectedSpaceId, pendingCardText, pendingInfo, applyEvent, clearPendingAction }
+  return {
+    status, currentTurn, players, logs, availableRooms, lastDice,
+    pendingAction, selectedSpaceId, pendingInfo, pendingCard,
+    applyEvent, clearPendingAction
+  }
 })
