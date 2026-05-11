@@ -84,44 +84,25 @@ const spaces = Array.from({ length: 40 }, (_, i) => getSpaceById(i)).filter(Bool
 
 // 🔑 Позиции для сетки 12 колонок × 8 рядов
 // Визуальные углы: 0, 10, 13, 20, 23, 30, 32
+// 🔑 Позиции для сетки 13 колонок × 9 рядов
+// Визуальные углы: 0, 10, 13, 20, 23, 30, 32
+// 🔑 Позиции для сетки 13×9 со СТРОГО последовательным порядком 0→39
+// Круг по периметру: верх(→) → право(↓) → низ(←) → лево(↑)
+// 🔑 Позиции для сетки 13×9 (строго 0→39 по периметру)
 const getPos = (i: number) => {
   if (i === 40) i = 0
 
-  // === ВЕРХНЯЯ СТОРОНА (ряд 1) ===
-  if (i === 0) return { row: 1, col: 1 }           // START
-  if (i >= 1 && i <= 9) return { row: 1, col: i + 1 }  // 1→col2, ..., 9→col10
-  if (i === 10) return { row: 1, col: 12 }         // Just Visiting
+  // Верх: 0-12 (ряд 1, слева→направо)
+  if (i <= 12) return { row: 1, col: i + 1 }
 
-  // === ПРАВАЯ СТОРОНА (колонка 12) ===
-  if (i === 11) return { row: 2, col: 12 }
-  if (i === 12) return { row: 3, col: 12 }
-  if (i === 13) return { row: 4, col: 12 }         // 🔷 Визуальный угол: Красноармейская
-  if (i === 14) return { row: 5, col: 12 }
-  if (i === 15) return { row: 6, col: 12 }
-  if (i === 16) return { row: 7, col: 12 }
+  // Право: 13-19 (колонка 13, сверху→вниз)
+  if (i <= 19) return { row: i - 11, col: 13 }
 
-  // === НИЖНЯЯ СТОРОНА (ряд 8) ===
-  if (i === 17) return { row: 8, col: 11 }
-  if (i === 18) return { row: 8, col: 10 }
-  if (i === 19) return { row: 8, col: 9 }
-  if (i === 20) return { row: 8, col: 1 }          // Free Parking
-  if (i >= 21 && i <= 29) return { row: 8, col: i - 19 }  // 21→col2, ..., 29→col10
-  if (i === 30) return { row: 8, col: 12 }         // Go to Jail
+  // Низ: 20-32 (ряд 9, справа→налево)
+  if (i <= 32) return { row: 9, col: 13 - (i - 20) }
 
-  // === ЛЕВАЯ СТОРОНА (колонка 1, снизу→вверх) ===
-  if (i === 31) return { row: 7, col: 1 }          // 🔑 ИСПРАВЛЕНО: col: 1, а не 12
-  if (i === 32) return { row: 6, col: 1 }          // 🔷 Визуальный угол: Советской Армии
-  if (i === 33) return { row: 5, col: 1 }
-  if (i === 34) return { row: 4, col: 1 }
-  if (i === 35) return { row: 3, col: 1 }
-  if (i === 36) return { row: 2, col: 1 }
-
-  // === Переход к START (верхний ряд) ===
-  if (i === 37) return { row: 1, col: 11 }
-  if (i === 38) return { row: 1, col: 10 }
-  if (i === 39) return { row: 1, col: 9 }
-
-  return { row: 1, col: 1 } // Фоллбэк
+  // Лево: 33-39 (колонка 1, снизу→вверх)
+  return { row: 41 - i, col: 1 }
 }
 
 const rollDice = () => {
@@ -183,9 +164,12 @@ watch(() => store.logs.length, async () => {
     <LeftBar :hovered-owner-id="hoveredOwnerId" :set-hovered-owner-id="(id) => hoveredOwnerId = id" />
 
     <main class="flex-1 flex flex-col items-center justify-center p-2 md:p-4 overflow-hidden">
-      <!-- 🔑 Сетка 12×8: больше ширины, 8 рядов по высоте -->
-      <div class="relative w-full max-w-7xl aspect-[1.5/1] bg-white rounded-2xl shadow-2xl overflow-hidden grid grid-cols-12 grid-rows-8 gap-0.5 p-1 border-4 border-gray-800">
+      <!-- 🔑 Сетка 13×9: больше ширины и высоты, квадратные клетки -->
+      <!-- Сетка 13×9, квадратные клетки, горизонтальный текст везде -->
+      <!-- 🔑 Сетка 13×9, квадратные клетки, точное размещение -->
+      <div class="relative w-full max-w-7xl aspect-[13/9] bg-white rounded-2xl shadow-2xl overflow-hidden grid grid-cols-13 grid-rows-9 gap-0.5 p-1 border-4 border-gray-800">
 
+        <!-- Клетки доски -->
         <!-- Клетки доски -->
         <div v-for="(space, i) in spaces" :key="space.id" @click="openSpaceInfo(space.id)" @mouseenter="handleTileHover(space)" @mouseleave="clearTileHover()"
              class="relative border border-gray-300/30 flex items-center justify-center text-[9px] md:text-[10px] font-medium select-none cursor-pointer transition-all duration-150 overflow-hidden aspect-square"
@@ -201,27 +185,22 @@ watch(() => store.logs.length, async () => {
              :style="`grid-row: ${getPos(space.id).row}; grid-column: ${getPos(space.id).col};`">
 
           <div class="w-full h-full flex flex-col items-center justify-center p-0.5 relative">
-
-            <!-- 🔼 Горизонтальный текст для верх/низ/углов -->
-            <template v-if="true">
-              <span class="text-center leading-tight font-semibold px-0.5 break-words text-xs">{{ space.name }}</span>
-              <span v-if="space.price > 0" class="text-[8px] font-mono text-gray-600 mt-0.5 bg-white/40 px-0.5 rounded">{{ space.price }}₽</span>
-            </template>
-
-            <!-- 🔽 Повёрнутый текст: боковые стороны (лево/право) -->
+            <!-- 🔼 ВСЕ названия горизонтально (больше места благодаря сетке 13×9) -->
+            <span class="text-center leading-tight font-semibold px-0.5 break-words text-[9px] md:text-[10px]">{{ space.name }}</span>
+            <span v-if="space.price > 0" class="text-[7px] md:text-[8px] font-mono text-gray-600 mt-0.5 bg-white/40 px-0.5 rounded">{{ space.price }}₽</span>
 
             <!-- Индикаторы домов -->
             <div v-if="space.type === 'property' && ownerMap[space.id]" class="absolute top-0.5 left-0.5 flex gap-0.5 z-20">
               <template v-for="h in (store.players.find(p => p.id === ownerMap[space.id])?.houses?.[space.id] || 0)" :key="h">
-                <span v-if="h < 5" class="text-[8px]">🏠</span>
-                <span v-else class="text-[8px]">🏨</span>
+                <span v-if="h < 5" class="text-[7px] md:text-[8px]">🏠</span>
+                <span v-else class="text-[7px] md:text-[8px]">🏨</span>
               </template>
             </div>
 
             <div v-if="ownerMap[space.id]" class="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full ring-1 ring-white/50" :class="store.players.find(p => p.id === ownerMap[space.id])?.color || 'bg-gray-500'"></div>
             <div class="absolute bottom-0.5 flex gap-0.5">
               <div v-for="p in store.players.filter(pl => pl.pos === space.id)" :key="p.id"
-                   class="w-3.5 h-3.5 rounded-full border-[1.5px] border-white/90 shadow-md flex items-center justify-center text-[7px] font-bold text-white"
+                   class="w-3.5 h-3.5 rounded-full border-[1.5px] border-white/90 shadow-md flex items-center justify-center text-[6px] md:text-[7px] font-bold text-white"
                    :style="{ backgroundColor: getPlayerColorHex(p.color) }" :title="p.name">
                 {{ p.name?.charAt(0).toUpperCase() }}
               </div>
@@ -230,7 +209,7 @@ watch(() => store.logs.length, async () => {
         </div>
 
         <!-- 🔑 Центр доски: занимает col 2-11, row 2-7 (при сетке 12×8) -->
-        <div class="col-start-2 col-span-10 row-start-2 row-span-6 bg-gray-50 text-gray-800 flex flex-col items-center justify-center p-4 md:p-6 rounded-2xl gap-3 md:gap-4">
+        <div class="col-start-2 col-span-11 row-start-2 row-span-7 bg-gray-50 text-gray-800 flex flex-col items-center justify-center p-4 md:p-6 rounded-2xl gap-3 md:gap-4">
 
           <!-- Кубики -->
           <div class="flex gap-3 md:gap-4 bg-white px-4 md:px-6 py-2 md:py-3 rounded-xl shadow-md border border-gray-200">
