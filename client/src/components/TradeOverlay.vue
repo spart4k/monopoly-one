@@ -21,19 +21,38 @@ const isMyTurnToRespond = computed(() => isProposed.value && trade.value?.lastPr
 
 const getSpace = (id: number) => getSpaceById(id)
 const myProperties = computed(() => myPlayer.value?.properties?.map(getSpace).filter(Boolean) || [])
+// 🔑 Имущество ВТОРОГО игрока
+const otherPlayerProperties = computed(() => otherPlayer.value?.properties?.map(getSpace).filter(Boolean) || [])
 
-const toggleProp = (id: number) => {
+const toggleMyProp = (id: number) => {
   const list = [...(myOffer.value?.properties || [])]
   const idx = list.indexOf(id)
-  if (idx === -1) list.push(id)
-  else list.splice(idx, 1)
+  if (idx === -1) list.push(id); else list.splice(idx, 1)
   sendEvent({ type: 'TRADE_EDIT', playerId: myId.value, side: isInitiator.value ? 'from' : 'to', offer: { ...myOffer.value, properties: list } })
 }
 
-const updateMoney = (e: Event) => {
+// 🔑 Переключение имущества ВТОРОГО игрока
+const toggleTheirProp = (id: number) => {
+  const list = [...(theirOffer.value?.properties || [])]
+  const idx = list.indexOf(id)
+  if (idx === -1) list.push(id); else list.splice(idx, 1)
+
+  const side = isInitiator.value ? 'to' : 'from'
+  sendEvent({
+    type: 'TRADE_EDIT', playerId: myId.value, side,
+    offer: { properties: list, money: theirOffer.value?.money ?? 0, jailCards: 0 }
+  })
+}
+
+const updateTheirMoney = (e: Event) => {
   const val = Number((e.target as HTMLInputElement).value)
   if (isNaN(val) || val < 0) return
-  sendEvent({ type: 'TRADE_EDIT', playerId: myId.value, side: isInitiator.value ? 'from' : 'to', offer: { ...myOffer.value, money: val } })
+
+  const side = isInitiator.value ? 'to' : 'from'
+  sendEvent({
+    type: 'TRADE_EDIT', playerId: myId.value, side,
+    offer: { ...theirOffer.value, money: val }
+  })
 }
 </script>
 
@@ -42,40 +61,46 @@ const updateMoney = (e: Event) => {
     <!-- Шапка -->
     <div class="flex justify-between items-center mb-4 pb-2 border-b border-gray-300">
       <h2 class="text-lg font-bold text-gray-900 flex items-center gap-2">🤝 Обмен <span class="text-sm font-normal text-gray-600">с {{ otherPlayer?.name }}</span></h2>
-      <div class="px-3 py-1 rounded-full text-xs font-bold" :class="isProposed ? 'bg-yellow-100 text-yellow-800 border border-yellow-200' : 'bg-blue-100 text-blue-800 border border-blue-200'">
-        {{ isProposed ? (isMyTurnToRespond ? 'Ваш ход' : 'Ожидание...') : 'Черновик' }}
+      <div class="px-3 py-1 rounded-full text-xs font-bold" :class="trade?.status === 'proposed'
+             ? (isMyTurnToRespond ? 'bg-yellow-100 text-yellow-800 border border-yellow-200' : 'bg-purple-100 text-purple-800 border border-purple-200')
+             : 'bg-blue-100 text-blue-800 border border-blue-200 animate-pulse'">
+        {{ trade?.status === 'proposed'
+          ? (isMyTurnToRespond ? 'Ваш ход' : 'Ожидание...')
+          : '📝 Подготовка...' }}
       </div>
     </div>
 
     <!-- Тело (2 колонки) -->
     <div class="flex-1 grid grid-cols-2 gap-4 min-h-0 overflow-hidden">
-      <!-- Моя сторона -->
+      <!-- 🔵 Моя сторона (Я отдаю) -->
       <div class="flex flex-col space-y-3 bg-white/90 backdrop-blur p-3 rounded-xl border border-gray-300 shadow-sm">
         <h3 class="font-semibold text-base border-b pb-1 text-gray-900">🟦 Я отдаю</h3>
         <div class="flex items-center gap-2 bg-gray-100 p-2 rounded">
-          <span class="text-sm font-medium text-gray-700">💰 Деньги:</span>
-          <input type="number" :value="myOffer?.money ?? 0" @input="updateMoney" :disabled="isProposed && !isMyTurnToRespond" class="w-24 px-2 py-1 border border-gray-300 rounded text-right text-sm font-mono disabled:bg-gray-200 disabled:text-gray-500 text-gray-900 focus:ring-2 focus:ring-blue-500 outline-none">
+          <span class="text-sm font-medium text-gray-700">💰 Моих денег:</span>
+          <input type="number" :value="myOffer?.money ?? 0" @input="updateMyMoney" :disabled="isProposed && !isMyTurnToRespond" class="w-24 px-2 py-1 border border-gray-300 rounded text-right text-sm font-mono disabled:bg-gray-200 disabled:text-gray-500 text-gray-900 focus:ring-2 focus:ring-blue-500 outline-none">
         </div>
         <div class="flex-1 grid grid-cols-2 gap-1.5 overflow-y-auto pr-1 custom-scroll">
           <label v-for="s in myProperties" :key="s.id" class="flex items-center gap-1 p-2 bg-gray-50 border border-gray-200 rounded cursor-pointer hover:bg-blue-50 transition select-none" :class="{ 'bg-blue-100 border-blue-400': myOffer?.properties.includes(s.id) }">
-            <input type="checkbox" :checked="myOffer?.properties.includes(s.id)" @change="toggleProp(s.id)" :disabled="isProposed && !isMyTurnToRespond" class="cursor-pointer accent-blue-600">
+            <input type="checkbox" :checked="myOffer?.properties.includes(s.id)" @change="toggleMyProp(s.id)" :disabled="isProposed && !isMyTurnToRespond" class="cursor-pointer accent-blue-600">
             <span class="text-xs truncate text-gray-800 font-medium" :title="s.name">{{ s.name }}</span>
           </label>
+          <div v-if="!myProperties.length" class="col-span-2 text-center text-gray-500 text-sm py-4">Нет имущества</div>
         </div>
       </div>
 
-      <!-- Их сторона -->
+      <!-- 🔴 Сторона второго игрока (Прошу от них) -->
       <div class="flex flex-col space-y-3 bg-white/90 backdrop-blur p-3 rounded-xl border border-gray-300 shadow-sm">
-        <h3 class="font-semibold text-base border-b pb-1 text-gray-900">🟥 Получаю</h3>
+        <h3 class="font-semibold text-base border-b pb-1 text-gray-900">🟥 Прошу от {{ otherPlayer?.name }}</h3>
         <div class="flex items-center gap-2 bg-gray-100 p-2 rounded">
-          <span class="text-sm font-medium text-gray-700">💰 Деньги:</span>
-          <span class="w-24 px-2 py-1 border border-gray-300 rounded text-right bg-gray-200 text-gray-800 text-sm font-mono">{{ theirOffer?.money || 0 }}₽</span>
+          <span class="text-sm font-medium text-gray-700">💰 Запросят денег:</span>
+          <input type="number" :value="theirOffer?.money ?? 0" @input="updateTheirMoney" :disabled="isProposed && !isMyTurnToRespond" class="w-24 px-2 py-1 border border-gray-300 rounded text-right text-sm font-mono disabled:bg-gray-200 disabled:text-gray-500 text-gray-900 focus:ring-2 focus:ring-red-500 outline-none">
         </div>
         <div class="flex-1 grid grid-cols-2 gap-1.5 overflow-y-auto pr-1 custom-scroll">
-          <div v-for="id in (theirOffer?.properties || [])" :key="id" class="p-2 bg-gray-50 border border-gray-200 rounded text-xs truncate text-gray-800 font-medium">
-            {{ getSpace(id)?.name }}
-          </div>
-          <div v-if="!theirOffer?.properties?.length" class="col-span-2 text-center text-gray-500 text-sm py-4">Ничего не выбрано</div>
+          <label v-for="s in otherPlayerProperties" :key="s.id" class="flex items-center gap-1 p-2 bg-gray-50 border border-gray-200 rounded cursor-pointer hover:bg-red-50 transition select-none" :class="{ 'bg-red-100 border-red-400': theirOffer?.properties.includes(s.id) }">
+            <input type="checkbox" :checked="theirOffer?.properties.includes(s.id)" @change="toggleTheirProp(s.id)" :disabled="isProposed && !isMyTurnToRespond" class="cursor-pointer accent-red-600">
+            <span class="text-xs truncate text-gray-800 font-medium" :title="s.name">{{ s.name }}</span>
+          </label>
+          <div v-if="!otherPlayerProperties.length" class="col-span-2 text-center text-gray-500 text-sm py-4">У игрока нет имущества</div>
         </div>
       </div>
     </div>

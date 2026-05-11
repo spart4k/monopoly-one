@@ -15,8 +15,12 @@ const store = useGameStore()
 const { myId } = useSession()
 
 const isTrading = computed(() => {
-  if (!store.activeTrade) return false
-  return store.activeTrade.initiator === myId.value || store.activeTrade.responder === myId.value
+  const t = store.activeTrade
+  if (!t) return false
+  // ✅ Показываем панель обмена:
+  // 1. Если я инициатор (вижу свой черновик)
+  // 2. Если обмен уже отправлен (proposed) -> виден обоим
+  return t.initiator === myId.value || t.status !== 'draft'
 })
 
 const isMyTurn = computed(() => !!store.currentTurn && !!myId.value && store.currentTurn === myId.value)

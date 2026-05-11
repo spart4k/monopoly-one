@@ -19,7 +19,16 @@ export function handleTradeInit(room: Room, initiator: string, responder: string
   if (!room.getPlayer(initiator) || !room.getPlayer(responder) || initiator === responder) return { error: 'Некорректные игроки' }
   if (room.state.activeTrade) return { error: 'Уже идет обмен' }
 
-  room.state.activeTrade = { initiator, responder, from: { properties: [], money: 0, jailCards: 0 }, to: { properties: [], money: 0, jailCards: 0 }, status: 'draft', lastProposer: null, messages: [] }
+  room.state.activeTrade = {
+    initiator, responder,
+    from: { properties: [], money: 0, jailCards: 0 },
+    to: { properties: [], money: 0, jailCards: 0 },
+    status: 'draft',
+    lastProposer: null,
+    messages: []
+  }
+  // 🔑 Лог только для инициатора (черновик)
+  room.addLog(`📝 ${room.getPlayer(initiator)?.name} готовит обмен с ${room.getPlayer(responder)?.name}...`)
   broadcast(roomViews, room.id, { type: 'SYNC_STATE', payload: buildSyncPayload(room.state) })
   return { success: true }
 }
@@ -27,14 +36,34 @@ export function handleTradeInit(room: Room, initiator: string, responder: string
 export function handleTradeEdit(room: Room, playerId: string, side: 'from' | 'to', offer: any, roomViews: Map<string, RoomView>) {
   const t = room.state.activeTrade
   if (!t) return { error: 'Нет активного обмена' }
-  const isFrom = playerId === t.initiator
-  if ((side === 'from') !== isFrom) return { error: 'Нельзя редактировать чужую сторону' }
 
-  const err = validateOffer(room, playerId, offer)
-  if (err) return { error: err }
+  // 🔑 Определяем, чьё имущество/деньги на самом деле редактируются
+  const targetId = side === 'from' ? t.initiator : t.responder
+  const owner = room.getPlayer(targetId)
+  if (!owner) return { error: 'Владелец стороны не найден' }
 
-  t[side] = { ...offer }
-  if (t.status === 'proposed') { t.status = 'draft'; t.lastProposer = null; room.addLog(`🔄 ${room.getPlayer(playerId)?.name} внес изменения`) }
+  // Валидация денег и карт выхода из тюрьмы
+  if ((offer.money ?? 0) > owner.money) return `Недостаточно денег у ${owner.name}`
+  if ((offer.jailCards || 0) > owner.jailCards) return `Нет карты "Выход из тюрьмы" у ${owner.name}`
+
+  // Валидация прав на участки
+  for (const id of (offer.properties || [])) {
+    if (!owner.properties.includes(id)) return `${owner.name} не владеет клеткой ${id}`
+  }
+
+  // 🔑 Применяем изменения (инициатор может править ОБЕ стороны в draft)
+  t[side] = {
+    properties: offer.properties || [],
+    money: offer.money ?? 0,
+    jailCards: offer.jailCards || 0
+  }
+
+  // Если предложение уже висело, сбрасываем в черновик (контр-предложение)
+  if (t.status === 'proposed') {
+    t.status = 'draft'; t.lastProposer = null
+    room.addLog(`🔄 ${room.getPlayer(playerId)?.name} изменил условия обмена`)
+  }
+
   broadcast(roomViews, room.id, { type: 'SYNC_STATE', payload: buildSyncPayload(room.state) })
   return { success: true }
 }
@@ -49,7 +78,8 @@ export function handleTradePropose(room: Room, playerId: string, roomViews: Map<
 
   t.status = 'proposed'
   t.lastProposer = playerId
-  room.addLog(`📤 ${room.getPlayer(playerId)?.name} отправил предложение обмена`)
+  // 🔑 Лог для обоих (предложение отправлено)
+  room.addLog(`📤 ${room.getPlayer(playerId)?.name} отправил предложение обмена игроку ${room.getPlayer(t.responder)?.name}`)
   broadcast(roomViews, room.id, { type: 'SYNC_STATE', payload: buildSyncPayload(room.state) })
   return { success: true }
 }
