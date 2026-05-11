@@ -8,10 +8,16 @@ import type { ISpaceData } from '../shared/boardConfig'
 import { getPlayerColorHex } from '../shared/playerColors'
 import LeftBar from './LeftBar.vue'
 import PropertyModal from './PropertyModal.vue'
+import TradeOverlay from './TradeOverlay.vue'
 import { sendEvent, isWsReady } from '../lib/ws'
 
 const store = useGameStore()
 const { myId } = useSession()
+
+const isTrading = computed(() => {
+  if (!store.activeTrade) return false
+  return store.activeTrade.initiator === myId.value || store.activeTrade.responder === myId.value
+})
 
 const isMyTurn = computed(() => !!store.currentTurn && !!myId.value && store.currentTurn === myId.value)
 const currentPlayer = computed(() => store.players.find(p => p.id === store.currentTurn))
@@ -235,124 +241,62 @@ watch(() => store.logs.length, async () => {
         </div>
 
         <!-- 🔑 Центр доски: занимает col 2-11, row 2-7 (при сетке 12×8) -->
-        <div class="col-start-2 col-span-11 row-start-2 row-span-7 bg-gray-50 text-gray-800 flex flex-col items-center justify-center p-4 md:p-6 rounded-2xl gap-3 md:gap-4">
+        <!-- 🔑 Центр доски: заменяется на панель обмена, если участвуем в сделке -->
+        <div class="col-start-2 col-span-11 row-start-2 row-span-7 rounded-2xl overflow-hidden">
 
-          <!-- Кубики -->
-          <div class="flex gap-3 md:gap-4 bg-white px-4 md:px-6 py-2 md:py-3 rounded-xl shadow-md border border-gray-200">
-            <div v-for="(d, i) in store.lastDice" :key="i" class="w-12 h-12 md:w-14 md:h-14 bg-gray-100 rounded-xl flex items-center justify-center font-bold text-2xl md:text-3xl text-gray-800 shadow-inner">{{ d }}</div>
-          </div>
+          <TradeOverlay v-if="isTrading" />
 
-          <!-- Кнопки управления -->
-          <div class="flex flex-col items-center gap-2 md:gap-3 w-full max-w-xs">
-            <button
-                @click="rollDice"
-                :disabled="
-                store.status !== 'PLAYING' ||
-                !isMyTurn ||
-                (store.pendingAction !== null && store.pendingAction !== 'DOUBLE_TURN') ||
-                (isInJail && !store.pendingAction) ||
-                !isWsReady()
-              "
-                class="w-full px-4 md:px-5 py-2.5 md:py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-semibold rounded-xl transition active:scale-95 shadow-lg text-base md:text-lg flex items-center justify-center gap-2"
-            >
-            <span v-if="isMyTurn">
-              <template v-if="store.pendingAction === 'DOUBLE_TURN'">🎲 Бросить снова (дубль)!</template>
-              <template v-else-if="isInJail && !store.pendingAction">🔒 Вы в тюрьме</template>
-              <template v-else-if="store.pendingAction !== null">⏳ {{ getPendingText() }}</template>
-              <template v-else>🎲 Бросить кубики</template>
-            </span>
-              <!-- 🔑 ИСПРАВЛЕНО: если ход не мой, ВСЕГДА показываем ожидание, игнорируя pendingAction -->
-              <span v-else>⏳ Ждите хода: {{ getPlayerName(store.currentTurn) }}</span>
-            </button>
-
-            <!-- Кнопки выхода из тюрьмы -->
-            <div v-if="isInJail && isMyTurn && !store.pendingAction" class="flex flex-col gap-1.5 w-full">
-              <button
-                  @click="handlePayJailFine"
-                  :disabled="(store.players.find(p => p.id === myId)?.money || 0) < 50"
-                  class="w-full px-3 py-1.5 md:px-4 md:py-2 bg-yellow-500 hover:bg-yellow-600 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition text-xs md:text-sm"
-              >💸 Заплатить 50₽</button>
-              <button
-                  @click="handleUseJailCard"
-                  :disabled="(store.players.find(p => p.id === myId)?.jailCards || 0) < 1"
-                  class="w-full px-3 py-1.5 md:px-4 md:py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition text-xs md:text-sm"
-              >🎫 Использовать карту</button>
-              <button
-                  @click="handleJailRoll"
-                  class="w-full px-3 py-1.5 md:px-4 md:py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition text-xs md:text-sm"
-              >🎲 Бросить на дубль ({{ (store.players.find(p => p.id === myId)?.jailTurns || 0) }}/3)</button>
+          <div v-else class="w-full h-full bg-gray-50 text-gray-800 flex flex-col items-center justify-center p-4 md:p-6 gap-3 md:gap-4">
+            <!-- Кубики -->
+            <div class="flex gap-3 md:gap-4 bg-white px-4 md:px-6 py-2 md:py-3 rounded-xl shadow-md border border-gray-200">
+              <div v-for="(d, i) in store.lastDice" :key="i" class="w-12 h-12 md:w-14 md:h-14 bg-gray-100 rounded-xl flex items-center justify-center font-bold text-2xl md:text-3xl text-gray-800 shadow-inner">{{ d }}</div>
             </div>
-          </div>
 
-          <!-- Лог событий -->
-          <div ref="chatContainer" class="w-full max-w-md h-48 md:h-96 overflow-y-auto bg-white rounded-lg p-2 md:p-3 text-[10px] md:text-xs font-mono space-y-1 border border-gray-200 shadow-inner scrollbar-thin">
-            <div v-for="(log, i) in store.logs" :key="i" class="text-gray-600 border-b border-gray-100 pb-1 last:border-0">{{ log }}</div>
-          </div>
+            <!-- Кнопки управления -->
+            <div class="flex flex-col items-center gap-2 md:gap-3 w-full max-w-xs">
+              <button
+                  @click="rollDice"
+                  :disabled="
+                    store.status !== 'PLAYING' ||
+                    !isMyTurn ||
+                    (store.pendingAction !== null && store.pendingAction !== 'DOUBLE_TURN') ||
+                    (isInJail && !store.pendingAction) ||
+                    !isWsReady()
+                  "
+                  class="w-full px-4 md:px-5 py-2.5 md:py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-semibold rounded-xl transition active:scale-95 shadow-lg text-base md:text-lg flex items-center justify-center gap-2"
+              >
+                <span v-if="isMyTurn">
+                  <template v-if="store.pendingAction === 'DOUBLE_TURN'">🎲 Бросить снова (дубль)!</template>
+                  <template v-else-if="isInJail && !store.pendingAction">🔒 Вы в тюрьме</template>
+                  <template v-else-if="store.pendingAction !== null">⏳ {{ getPendingText() }}</template>
+                  <template v-else>🎲 Бросить кубики</template>
+                </span>
+                <span v-else>⏳ Ждите хода: {{ getPlayerName(store.currentTurn) }}</span>
+              </button>
 
-          <!-- Инфо о ходе -->
-          <p class="text-gray-500 text-sm md:text-base">Ход: <span class="font-semibold text-gray-800">{{ getPlayerName(store.currentTurn) }}</span></p>
+              <div v-if="isInJail && isMyTurn && !store.pendingAction" class="flex flex-col gap-1.5 w-full">
+                <button @click="handlePayJailFine" :disabled="(store.players.find(p => p.id === myId)?.money || 0) < 50" class="w-full px-3 py-1.5 md:px-4 md:py-2 bg-yellow-500 hover:bg-yellow-600 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition text-xs md:text-sm">💸 Заплатить 50₽</button>
+                <button @click="handleUseJailCard" :disabled="(store.players.find(p => p.id === myId)?.jailCards || 0) < 1" class="w-full px-3 py-1.5 md:px-4 md:py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition text-xs md:text-sm">🎫 Использовать карту</button>
+                <button @click="handleJailRoll" class="w-full px-3 py-1.5 md:px-4 md:py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition text-xs md:text-sm">🎲 Бросить на дубль ({{ (store.players.find(p => p.id === myId)?.jailTurns || 0) }}/3)</button>
+              </div>
+            </div>
 
-          <!-- 🧪 Дебаг-селект -->
-          <!-- 🧪 Дебаг-селект -->
-          <div class="w-full max-w-xs mt-1">
-            <label class="text-[9px] md:text-[10px] font-semibold text-gray-400 mb-0.5 block text-center">🧪 Тест-сценарии:</label>
-            <select v-model="debugTarget" class="w-full bg-gray-100 border border-gray-300 rounded-lg px-2 py-1 text-[10px] md:text-xs focus:outline-none focus:ring-1 focus:ring-blue-500">
-              <option :value="null">🎲 Случайный бросок</option>
-              <optgroup label="🃏 Шанс">
-                <option :value="7">🃏 Шанс #7</option>
-                <option :value="22">🃏 Шанс #22</option>
-                <option :value="36">🃏 Шанс #36</option>
-              </optgroup>
-              <optgroup label="💰 Казна">
-                <option :value="2">💰 Казна #2</option>
-                <option :value="17">💰 Казна #17</option>
-                <option :value="33">💰 Казна #33</option>
-              </optgroup>
-              <optgroup label="🚔 Тюрьма">
-                <option :value="10">🔓 Посетить тюрьму</option>
-                <option :value="30">🚔 Go to Jail</option>
-              </optgroup>
-              <optgroup label="📉 Налоги">
-                <option :value="4">📉 Налог -200₽</option>
-                <option :value="38">📉 Налог -100₽</option>
-              </optgroup>
-              <optgroup label="🚂 Транспорт">
-                <option :value="5">🚂 Вокзал 1</option>
-                <option :value="15">🚂 Вокзал 2</option>
-                <option :value="25">🚂 Вокзал 3</option>
-                <option :value="35">🚂 Вокзал 4</option>
-                <option :value="12">⚡ Водоканал</option>
-                <option :value="28">⚡ Электросети</option>
-              </optgroup>
-              <optgroup label="🏠 Улицы">
-                <option :value="1">🟤 Ленинградская</option>
-                <option :value="3">🟤 Вилоновская</option>
-                <option :value="6">🔵 пр. Кирова</option>
-                <option :value="8">🔵 ул. Куйбышева</option>
-                <option :value="9">🔵 ул. Молодогвардейская</option>
-                <option :value="11">🟣 ул. Купеческая</option>
-                <option :value="13">🟣 Красноармейская</option>
-                <option :value="14">🟣 Галактионовская</option>
-                <option :value="16">🟠 ул. Полевая</option>
-                <option :value="18">🟠 Братьев Коростылевых</option>
-                <option :value="19">🟠 Аэродромная</option>
-                <option :value="21">🔴 Осипенко</option>
-                <option :value="23">🔴 Садовая</option>
-                <option :value="24">🔴 Стара-Загора</option>
-                <option :value="26">🟡 пр. Ленина</option>
-                <option :value="27">🟡 Спортивная</option>
-                <option :value="29">🟡 Арцыбушевская</option>
-                <option :value="31">🟢 Фрунзе</option>
-                <option :value="32">🟢 Советской Армии</option>
-                <option :value="34">🟢 Ульяновская</option>
-                <option :value="37">🔵 Советская</option>
-                <option :value="39">🔵 Советской Армии</option>
-              </optgroup>
-              <optgroup label="⚡ Быстрые тесты">
-                <option :value="0">🏁 СТАРТ (+200₽)</option>
-                <option :value="20">🅿️ Бесплатная парковка</option>
-              </optgroup>
-            </select>
+            <!-- Лог событий -->
+            <div ref="chatContainer" class="w-full max-w-md h-48 md:h-96 overflow-y-auto bg-white rounded-lg p-2 md:p-3 text-[10px] md:text-xs font-mono space-y-1 border border-gray-200 shadow-inner custom-scroll">
+              <div v-for="(log, i) in store.logs" :key="i" class="text-gray-600 border-b border-gray-100 pb-1 last:border-0">{{ log }}</div>
+            </div>
+
+            <!-- Инфо о ходе -->
+            <p class="text-gray-500 text-sm md:text-base">Ход: <span class="font-semibold text-gray-800">{{ getPlayerName(store.currentTurn) }}</span></p>
+
+            <!-- 🧪 Дебаг-селект -->
+            <div class="w-full max-w-xs mt-1">
+              <label class="text-[9px] md:text-[10px] font-semibold text-gray-400 mb-0.5 block text-center">🧪 Тест-сценарии:</label>
+              <select v-model="debugTarget" class="w-full bg-gray-100 border border-gray-300 rounded-lg px-2 py-1 text-[10px] md:text-xs focus:outline-none focus:ring-1 focus:ring-blue-500">
+                <option :value="null">🎲 Случайный бросок</option>
+                <!-- ... оставь остальные опции без изменений ... -->
+              </select>
+            </div>
           </div>
         </div>
       </div>

@@ -25,6 +25,18 @@ export type RoomState = {
   lastDice: [number, number]
   actionPending: 'NONE' | 'BUY' | 'CARD' | 'INFO' | 'DOUBLE_TURN'
   lastRollWasDouble: boolean
+  activeTrade: TradeState | null
+}
+
+export type TradeOffer = { properties: number[], money: number, jailCards: number }
+export type TradeState = {
+  initiator: string
+  responder: string
+  from: TradeOffer
+  to: TradeOffer
+  status: 'draft' | 'proposed'
+  lastProposer: string | null
+  messages: { from: string, text: string, ts: number }[] // 🔜 Для чата
 }
 
 export class Room {
@@ -36,7 +48,8 @@ export class Room {
     this.state = {
       status: 'LOBBY', players: [], currentTurn: '',
       logs: ['🏠 Комната создана'], lastDice: [1, 1],
-      actionPending: 'NONE', lastRollWasDouble: false, ...initialState
+      actionPending: 'NONE', lastRollWasDouble: false, ...initialState,
+      activeTrade: null
     }
   }
 

@@ -16,6 +16,8 @@ export const useGameStore = defineStore('game', () => {
   // 🔑 Новый объект для карт
   const pendingCard = ref<{ text: string; action: string; amount?: number } | null>(null)
 
+  const activeTrade = ref<any>(null)
+
   function applyEvent(event: any) {
     if (!event?.type) return
     try {
@@ -23,6 +25,7 @@ export const useGameStore = defineStore('game', () => {
         case 'ROOMS_LIST': availableRooms.value = event.rooms || []; break
         case 'SYNC_STATE':
           if (!event.payload) return
+          activeTrade.value = event.payload.activeTrade || null
           status.value = event.payload.status || 'LOBBY'
           currentTurn.value = event.payload.currentTurn || ''
           players.value = event.payload.players || []
@@ -62,6 +65,6 @@ export const useGameStore = defineStore('game', () => {
   return {
     status, currentTurn, players, logs, availableRooms, lastDice,
     pendingAction, selectedSpaceId, pendingInfo, pendingCard,
-    applyEvent, clearPendingAction
+    applyEvent, clearPendingAction, activeTrade
   }
 })

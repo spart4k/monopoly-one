@@ -2,8 +2,11 @@
 <script setup lang="ts">
 import { useGameStore } from '../stores/game'
 import { getPlayerColorHex } from '../shared/playerColors'
-
+import { useSession } from '../composables/useSession'
+import { sendEvent } from '../lib/ws'
 const store = useGameStore()
+const { myId } = useSession()
+
 </script>
 
 <template>
@@ -27,9 +30,13 @@ const store = useGameStore()
             <p class="text-xs text-gray-400 font-mono">💰 {{ p.money }}₽</p>
           </div>
 
-          <span v-if="p.id === store.currentTurn" class="text-xs bg-green-500/20 text-green-300 px-2 py-0.5 rounded-full border border-green-500/30 animate-pulse">
-            🎲 Ход
-          </span>
+          <button
+              v-if="p.id !== myId && store.status === 'PLAYING' && !store.activeTrade"
+              @click="sendEvent({ type: 'TRADE_INIT', playerId: myId, responder: p.id })"
+              class="ml-auto px-2 py-1 text-xs bg-indigo-600 hover:bg-indigo-700 text-white rounded transition"
+              title="Предложить обмен"
+          >💱</button>
+          <span v-if="p.id === store.currentTurn" class="text-xs bg-green-500/20 text-green-300 px-2 py-0.5 rounded-full border border-green-500/30 animate-pulse">🎲 Ход</span>
           <span v-if="p.isInJail" class="text-xs bg-red-500/20 text-red-300 px-2 py-0.5 rounded-full border border-red-500/30">
             🔒
           </span>

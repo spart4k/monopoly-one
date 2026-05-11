@@ -7,6 +7,7 @@ import { handleRollDice } from './events/handlers/rollDice'
 import { handleBuyProperty, handlePassAction } from './events/handlers/buyProperty'
 import { handlePayJailFine, useJailCard } from './events/handlers/jailAction'
 import { handleBuyHouse, handleSellHouse } from './events/handlers/buildHouse'
+import { handleTradeInit, handleTradeEdit, handleTradePropose, handleTradeAccept, handleTradeDecline } from './events/handlers/tradeAction'
 
 const fastify = Fastify({ logger: false })
 const roomManager = new RoomManager()
@@ -98,6 +99,13 @@ async function handleEvent(msg: string, socket: any) {
     if (type === 'PAY_JAIL_FINE' || type === 'USE_JAIL_CARD') { const fn = type === 'PAY_JAIL_FINE' ? handlePayJailFine : useJailCard; const r = fn(room, playerId, roomManager.getAllRoomViews()); if(r?.error) socket.send(JSON.stringify({type:'ERROR',message:r.error})); return }
     if (type === 'BUY_HOUSE') { const r = handleBuyHouse(room, playerId, spaceId, roomManager.getAllRoomViews()); if(r?.error) socket.send(JSON.stringify({type:'ERROR',message:r.error})); return }
     if (type === 'SELL_HOUSE') { const r = handleSellHouse(room, playerId, spaceId, roomManager.getAllRoomViews()); if(r?.error) socket.send(JSON.stringify({type:'ERROR',message:r.error})); return }
+
+    // Обмен
+    if (type === 'TRADE_INIT') { const r = handleTradeInit(room, playerId, event.responder, roomManager.getAllRoomViews()); if(r?.error) socket.send(JSON.stringify({type:'ERROR',message:r.error})); return }
+    if (type === 'TRADE_EDIT') { const r = handleTradeEdit(room, playerId, event.side, event.offer, roomManager.getAllRoomViews()); if(r?.error) socket.send(JSON.stringify({type:'ERROR',message:r.error})); return }
+    if (type === 'TRADE_PROPOSE') { const r = handleTradePropose(room, playerId, roomManager.getAllRoomViews()); if(r?.error) socket.send(JSON.stringify({type:'ERROR',message:r.error})); return }
+    if (type === 'TRADE_ACCEPT') { const r = handleTradeAccept(room, playerId, roomManager.getAllRoomViews()); if(r?.error) socket.send(JSON.stringify({type:'ERROR',message:r.error})); return }
+    if (type === 'TRADE_DECLINE') { const r = handleTradeDecline(room, playerId, roomManager.getAllRoomViews()); if(r?.error) socket.send(JSON.stringify({type:'ERROR',message:r.error})); return }
 
   } catch (e: any) {
     console.error(`💥 [EV] CRASH: ${e?.message}`)

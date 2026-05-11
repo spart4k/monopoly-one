@@ -5,21 +5,13 @@ export function buildSyncPayload(state: any) {
   return {
     status: state.status,
     players: state.players.map((p: any) => ({
-      id: p.id,
-      name: p.name,
-      color: p.color,
-      pos: p.pos,
-      money: p.money,
-      properties: p.properties,
-      houses: p.houses || {}, // 🔑 КРИТИЧНО: передаём дома
-      isInJail: p.isInJail,
-      jailTurns: p.jailTurns,
-      jailCards: p.jailCards,
+      id: p.id, name: p.name, color: p.color, pos: p.pos, money: p.money,
+      properties: p.properties, houses: p.houses || {},
+      isInJail: p.isInJail, jailTurns: p.jailTurns, jailCards: p.jailCards,
       consecutiveDoubles: p.consecutiveDoubles
     })),
-    currentTurn: state.currentTurn,
-    logs: state.logs,
-    lastDice: state.lastDice
+    currentTurn: state.currentTurn, logs: state.logs, lastDice: state.lastDice,
+    activeTrade: state.activeTrade // 🔑 Передаем состояние обмена
   }
 }
 
