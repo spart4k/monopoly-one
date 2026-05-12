@@ -4,21 +4,27 @@ import type { RoomView } from '../../rooms/RoomManager'
 import { broadcast, buildSyncPayload } from '../../lib/ws-utils'
 import { getSpaceById } from '../../shared/boardConfig'
 
-// 🔹 Логирование для отладки
 function logState(room: Room, action: string, details: string = '') {
   const p = room.getPlayer(room.state.currentTurn)
   console.log(`📜 [STATE] ${action} | Room: ${room.id} | Pending: ${room.state.actionPending} | Double: ${room.state.lastRollWasDouble} | Consecutive: ${p?.consecutiveDoubles || 0} | ${details}`)
 }
 
-// 🔹 Покупка недвижимости
-export function handleBuyProperty(room: Room, playerId: string, spaceId: number, roomViews: Map<string, RoomView>) {
+export function handleBuyProperty(
+  room: Room,
+  playerId: string,
+  spaceId: number,
+  roomViews: Map<string, RoomView>
+) {
   logState(room, 'BUY_PROPERTY_START')
   const player = room.getPlayer(playerId)
   if (!player) return { error: 'Игрок не найден' }
 
-  // 🔑 Проверяем ожидаемое действие, а не только currentTurn (избегаем гонок)
-  if (room.state.actionPending !== 'BUY') return { error: 'Ожидается действие покупки или оно уже завершено' }
-  if (playerId !== room.state.currentTurn) return { error: 'Действие может выполнить только текущий игрок' }
+  if (room.state.actionPending !== 'BUY') {
+    return { error: 'Ожидается действие покупки или оно уже завершено' }
+  }
+  if (playerId !== room.state.currentTurn) {
+    return { error: 'Действие может выполнить только текущий игрок' }
+  }
 
   const space = getSpaceById(spaceId)
   if (!space || space.price === undefined) return { error: 'Клетка не найдена' }
@@ -26,7 +32,9 @@ export function handleBuyProperty(room: Room, playerId: string, spaceId: number,
 
   // Применяем покупку
   player.money -= space.price
-  if (!player.properties.includes(spaceId)) player.properties.push(spaceId)
+  if (!player.properties.includes(spaceId)) {
+    player.properties.push(spaceId)
+  }
   room.addLog(`🏠 ${player.name} купил ${space.name} за ${space.price}₽`)
   room.state.actionPending = 'NONE'
 
@@ -40,17 +48,22 @@ export function handleBuyProperty(room: Room, playerId: string, spaceId: number,
     room.finishTurn()
   }
 
-  broadcast(roomViews, room.id, { type: 'SYNC_STATE', payload: buildSyncPayload(room.state) })
+  broadcast(roomViews, room.id, {
+    type: 'SYNC_STATE',
+    payload: buildSyncPayload(room.state)
+  })
   return { success: true }
 }
 
-// 🔹 Пропуск действия / завершение модалки
-export function handlePassAction(room: Room, playerId: string, roomViews: Map<string, RoomView>) {
+export function handlePassAction(
+  room: Room,
+  playerId: string,
+  roomViews: Map<string, RoomView>
+) {
   logState(room, 'PASS_ACTION_START')
   const player = room.getPlayer(playerId)
   if (!player) return { error: 'Игрок не найден' }
 
-  // 🔑 Единое правило: если был дубль и < 3 подряд → ход сохраняется
   const keepTurn = room.state.lastRollWasDouble && player.consecutiveDoubles < 3
 
   // 1️⃣ Закрытие модалки КАРТЫ
@@ -63,8 +76,17 @@ export function handlePassAction(room: Room, playerId: string, roomViews: Map<st
       if (!owner) {
         room.state.actionPending = 'BUY'
         logState(room, 'CARD_RESOLVED -> BUY_OFFER')
-        broadcast(roomViews, room.id, { type: 'OFFER_BUY', playerId, spaceId: space.id, price: space.price, name: space.name })
-        broadcast(roomViews, room.id, { type: 'SYNC_STATE', payload: buildSyncPayload(room.state) })
+        broadcast(roomViews, room.id, {
+          type: 'OFFER_BUY',
+          playerId,
+          spaceId: space.id,
+          price: space.price,
+          name: space.name
+        })
+        broadcast(roomViews, room.id, {
+          type: 'SYNC_STATE',
+          payload: buildSyncPayload(room.state)
+        })
         return { success: true, actionRequired: true }
       } else if (owner.id !== playerId) {
         let rent = space.baseRent
@@ -74,8 +96,16 @@ export function handlePassAction(room: Room, playerId: string, roomViews: Map<st
         room.addLog(`💸 ${player.name} заплатил ${paid}₽ аренды ${space.name}`)
         room.state.actionPending = 'INFO'
         logState(room, 'CARD_RESOLVED -> RENT_INFO')
-        broadcast(roomViews, room.id, { type: 'ACTION_REQUIRED', title: '💸 Аренда', message: `Оплачено ${paid}₽`, icon: '💸' })
-        broadcast(roomViews, room.id, { type: 'SYNC_STATE', payload: buildSyncPayload(room.state) })
+        broadcast(roomViews, room.id, {
+          type: 'ACTION_REQUIRED',
+          title: '💸 Аренда',
+          message: `Оплачено ${paid}₽`,
+          icon: '💸'
+        })
+        broadcast(roomViews, room.id, {
+          type: 'SYNC_STATE',
+          payload: buildSyncPayload(room.state)
+        })
         return { success: true, actionRequired: true }
       }
     }
@@ -87,7 +117,10 @@ export function handlePassAction(room: Room, playerId: string, roomViews: Map<st
       logState(room, 'CARD_RESOLVED -> PASS_TURN')
       room.finishTurn()
     }
-    broadcast(roomViews, room.id, { type: 'SYNC_STATE', payload: buildSyncPayload(room.state) })
+    broadcast(roomViews, room.id, {
+      type: 'SYNC_STATE',
+      payload: buildSyncPayload(room.state)
+    })
     return { success: true }
   }
 
@@ -103,7 +136,10 @@ export function handlePassAction(room: Room, playerId: string, roomViews: Map<st
       logState(room, 'ACTION_RESOLVED -> FINISH_TURN')
     }
 
-    broadcast(roomViews, room.id, { type: 'SYNC_STATE', payload: buildSyncPayload(room.state) })
+    broadcast(roomViews, room.id, {
+      type: 'SYNC_STATE',
+      payload: buildSyncPayload(room.state)
+    })
     return { success: true }
   }
 

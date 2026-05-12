@@ -18,6 +18,11 @@ const COLOR_GROUPS: Record<string, number[]> = {
 export function handleBuyHouse(room: Room, playerId: string, spaceId: number, roomViews: Map<string, RoomView>) {
   const player = room.getPlayer(playerId)
   if (!player) return { error: 'Player not found' }
+
+  if (player.housesBoughtThisTurn) {
+    return { error: '🚫 Максимум 1 дом за ход' }
+  }
+
   if (player.mortgaged?.includes(spaceId)) {
     return { error: '🔒 Сначала выкупите улицу из залога' }
   }
@@ -45,6 +50,7 @@ export function handleBuyHouse(room: Room, playerId: string, spaceId: number, ro
 
   player.money -= cost
   player.houses[spaceId] = currentCount + 1
+  player.housesBoughtThisTurn = true
 
   const label = player.houses[spaceId] === 5 ? '🏨 Отель' : `🏠 Дом ${player.houses[spaceId]}/4`
   room.addLog(`🔨 ${player.name} купил ${label} на ${space.name} за ${cost}₽`)

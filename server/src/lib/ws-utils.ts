@@ -9,7 +9,8 @@ export function buildSyncPayload(state: any, currentPlayerId?: string) {
       properties: p.properties, houses: p.houses || {},
       mortgaged: p.mortgaged || [], // 🔑 КРИТИЧНО: отправляем список заложенных улиц
       isInJail: p.isInJail, jailTurns: p.jailTurns, jailCards: p.jailCards,
-      consecutiveDoubles: p.consecutiveDoubles
+      consecutiveDoubles: p.consecutiveDoubles,
+      housesBoughtThisTurn: p.housesBoughtThisTurn || false
     })),
     currentTurn: state.currentTurn, logs: state.logs, lastDice: state.lastDice,
     currentPlayerId,

@@ -4,12 +4,24 @@ import fastifyCors from '@fastify/cors'
 import fastifyWs from '@fastify/websocket'
 import { RoomManager } from './rooms/RoomManager'
 import { buildSyncPayload } from './lib/ws-utils'
-import { handleRollDice } from './events/handlers/rollDice'
-import { handleBuyProperty, handlePassAction } from './events/handlers/buyProperty'
-import { handlePayJailFine, useJailCard } from './events/handlers/jailAction'
-import { handleBuyHouse, handleSellHouse } from './events/handlers/buildHouse'
-import { handleTradeInit, handleTradeEdit, handleTradePropose, handleTradeAccept, handleTradeDecline } from './events/handlers/tradeAction'
-import { handleMortgage, handleUnmortgage } from './events/handlers/mortgageAction'
+
+// 🔹 Импорт всех хендлеров из централизованного файла
+import {
+  handleRollDice,
+  handleBuyProperty,
+  handlePassAction,
+  handlePayJailFine,
+  useJailCard,
+  handleBuyHouse,
+  handleSellHouse,
+  handleTradeInit,
+  handleTradeEdit,
+  handleTradePropose,
+  handleTradeAccept,
+  handleTradeDecline,
+  handleMortgage,
+  handleUnmortgage
+} from './events'
 
 const fastify = Fastify({ logger: false })
 const roomManager = new RoomManager()
@@ -25,7 +37,11 @@ function broadcastLobbyUpdate(targetSocket?: any) {
     .map(r => ({
       id: r.id,
       status: r.state.status,
-      players: r.state.players.map(p => ({ id: p.id, name: p.name, isReady: p.isReady })),
+      players: r.state.players.map(p => ({
+        id: p.id,
+        name: p.name,
+        isReady: p.isReady
+      })),
       maxPlayers: 4,
       createdBy: r.state.players[0]?.id || null
     }))
@@ -52,10 +68,20 @@ function broadcastLobbyUpdate(targetSocket?: any) {
 function toPayload(room: any) {
   return {
     status: room.state.status,
-    players: room.state.players.map((p:any)=>({
-      id:p.id,name:p.name,color:p.color,pos:p.pos,money:p.money,properties:p.properties,
-      houses: p.houses || {}, mortgaged: p.mortgaged || [],
-      isInJail:p.isInJail,jailTurns:p.jailTurns,jailCards:p.jailCards,consecutiveDoubles:p.consecutiveDoubles,isReady:p.isReady
+    players: room.state.players.map((p: any) => ({
+      id: p.id,
+      name: p.name,
+      color: p.color,
+      pos: p.pos,
+      money: p.money,
+      properties: p.properties,
+      houses: p.houses || {},
+      mortgaged: p.mortgaged || [],
+      isInJail: p.isInJail,
+      jailTurns: p.jailTurns,
+      jailCards: p.jailCards,
+      consecutiveDoubles: p.consecutiveDoubles,
+      isReady: p.isReady
     })),
     currentTurn: room.state.currentTurn,
     logs: room.state.logs,
@@ -106,7 +132,6 @@ async function handleEvent(msg: string, socket: any) {
       if (!pid) return socket.send(JSON.stringify({ type: 'ERROR', message: 'No playerId' }))
       if (!eventRoomId) return socket.send(JSON.stringify({ type: 'ERROR', message: 'No roomId' }))
 
-      // 🔑 КРИТИЧНО: await, потому что getOrCreateRoom возвращает Promise<Room>
       room = await roomManager.getOrCreateRoom(eventRoomId)
 
       let player = room.getPlayer(pid)
@@ -162,10 +187,16 @@ async function handleEvent(msg: string, socket: any) {
 
     // 🔹 START_GAME
     if (type === 'START_GAME') {
-      if (room.state.players[0]?.id !== playerId) return socket.send(JSON.stringify({ type: 'ERROR', message: 'Только создатель' }))
-      if (room.state.status !== 'LOBBY' || room.playerCount < 2) return socket.send(JSON.stringify({ type: 'ERROR', message: 'Нужно 2+ игрока в лобби' }))
+      if (room.state.players[0]?.id !== playerId) {
+        return socket.send(JSON.stringify({ type: 'ERROR', message: 'Только создатель' }))
+      }
+      if (room.state.status !== 'LOBBY' || room.playerCount < 2) {
+        return socket.send(JSON.stringify({ type: 'ERROR', message: 'Нужно 2+ игрока в лобби' }))
+      }
       const allReady = room.state.players.every(p => p.isReady || p.id === room.state.players[0]?.id)
-      if (!allReady) return socket.send(JSON.stringify({ type: 'ERROR', message: 'Не все игроки нажали "Готов"' }))
+      if (!allReady) {
+        return socket.send(JSON.stringify({ type: 'ERROR', message: 'Не все игроки нажали "Готов"' }))
+      }
       room.startGame()
       broadcastLobbyUpdate()
       room.broadcastState()
@@ -175,72 +206,72 @@ async function handleEvent(msg: string, socket: any) {
     // 🔹 Обработчики событий игры
     if (type === 'ROLL_DICE') {
       const r = handleRollDice(room, playerId, roomManager.getAllRoomViews(), event.targetSpaceId)
-      if(r?.error) socket.send(JSON.stringify({type:'ERROR',message:r.error}))
+      if (r?.error) socket.send(JSON.stringify({ type: 'ERROR', message: r.error }))
       return
     }
     if (type === 'BUY_PROPERTY') {
       const r = handleBuyProperty(room, playerId, Number(spaceId), roomManager.getAllRoomViews())
-      if(r?.error) socket.send(JSON.stringify({type:'ERROR',message:r.error}))
+      if (r?.error) socket.send(JSON.stringify({ type: 'ERROR', message: r.error }))
       return
     }
     if (type === 'PASS_ACTION') {
       const r = handlePassAction(room, playerId, roomManager.getAllRoomViews())
-      if(r?.error) socket.send(JSON.stringify({type:'ERROR',message:r.error}))
+      if (r?.error) socket.send(JSON.stringify({ type: 'ERROR', message: r.error }))
       return
     }
     if (type === 'PAY_JAIL_FINE' || type === 'USE_JAIL_CARD') {
       const fn = type === 'PAY_JAIL_FINE' ? handlePayJailFine : useJailCard
       const r = fn(room, playerId, roomManager.getAllRoomViews())
-      if(r?.error) socket.send(JSON.stringify({type:'ERROR',message:r.error}))
+      if (r?.error) socket.send(JSON.stringify({ type: 'ERROR', message: r.error }))
       return
     }
     if (type === 'BUY_HOUSE') {
       const r = handleBuyHouse(room, playerId, Number(spaceId), roomManager.getAllRoomViews())
-      if(r?.error) socket.send(JSON.stringify({type:'ERROR',message:r.error}))
+      if (r?.error) socket.send(JSON.stringify({ type: 'ERROR', message: r.error }))
       return
     }
     if (type === 'SELL_HOUSE') {
       const r = handleSellHouse(room, playerId, Number(spaceId), roomManager.getAllRoomViews())
-      if(r?.error) socket.send(JSON.stringify({type:'ERROR',message:r.error}))
+      if (r?.error) socket.send(JSON.stringify({ type: 'ERROR', message: r.error }))
       return
     }
 
     // 🔹 Обмен
     if (type === 'TRADE_INIT') {
       const r = handleTradeInit(room, playerId, event.responder, roomManager.getAllRoomViews())
-      if(r?.error) socket.send(JSON.stringify({type:'ERROR',message:r.error}))
+      if (r?.error) socket.send(JSON.stringify({ type: 'ERROR', message: r.error }))
       return
     }
     if (type === 'TRADE_EDIT') {
       const r = handleTradeEdit(room, playerId, event.side, event.offer, roomManager.getAllRoomViews())
-      if(r?.error) socket.send(JSON.stringify({type:'ERROR',message:r.error}))
+      if (r?.error) socket.send(JSON.stringify({ type: 'ERROR', message: r.error }))
       return
     }
     if (type === 'TRADE_PROPOSE') {
       const r = handleTradePropose(room, playerId, roomManager.getAllRoomViews())
-      if(r?.error) socket.send(JSON.stringify({type:'ERROR',message:r.error}))
+      if (r?.error) socket.send(JSON.stringify({ type: 'ERROR', message: r.error }))
       return
     }
     if (type === 'TRADE_ACCEPT') {
       const r = handleTradeAccept(room, playerId, roomManager.getAllRoomViews())
-      if(r?.error) socket.send(JSON.stringify({type:'ERROR',message:r.error}))
+      if (r?.error) socket.send(JSON.stringify({ type: 'ERROR', message: r.error }))
       return
     }
     if (type === 'TRADE_DECLINE') {
       const r = handleTradeDecline(room, playerId, roomManager.getAllRoomViews())
-      if(r?.error) socket.send(JSON.stringify({type:'ERROR',message:r.error}))
+      if (r?.error) socket.send(JSON.stringify({ type: 'ERROR', message: r.error }))
       return
     }
 
     // 🔹 Залог
     if (type === 'MORTGAGE_PROPERTY') {
       const r = handleMortgage(room, playerId, Number(event.spaceId), roomManager.getAllRoomViews())
-      if(r?.error) socket.send(JSON.stringify({type:'ERROR',message:r.error}))
+      if (r?.error) socket.send(JSON.stringify({ type: 'ERROR', message: r.error }))
       return
     }
     if (type === 'UNMORTGAGE_PROPERTY') {
       const r = handleUnmortgage(room, playerId, Number(event.spaceId), roomManager.getAllRoomViews())
-      if(r?.error) socket.send(JSON.stringify({type:'ERROR',message:r.error}))
+      if (r?.error) socket.send(JSON.stringify({ type: 'ERROR', message: r.error }))
       return
     }
 

@@ -3,6 +3,7 @@
 import { computed } from 'vue'
 import { useGameStore } from '../stores/game'
 import { useSession } from '../composables/useSession'
+import { getSpaceById } from '../shared/boardConfig'
 import type { ISpaceData } from '../shared/boardConfig'
 
 const store = useGameStore()
@@ -28,23 +29,55 @@ const emit = defineEmits<{
 }>()
 
 const isProperty = computed(() => props.space?.type === 'property' || props.space?.type === 'railroad')
-
-// 🔑 Это действие требует реакции ИМЕННО на ЭТУ ячейку?
-const isActionTarget = computed(() =>
-    props.actionRequired &&
-    (props.space?.id === store.selectedSpaceId || store.pendingAction === 'CARD')
-)
 const canAfford = computed(() => props.myMoney !== undefined && props.requiredAmount !== undefined && props.myMoney >= props.requiredAmount)
 const currentPlayer = computed(() => store.players.find(p => p.id === store.currentTurn))
 
+// 🔑 isActionTarget: это действие относится именно к этой ячейке?
+const isActionTarget = computed(() => {
+  if (!props.actionRequired) return false
+  if (store.pendingAction === 'CARD' || store.pendingAction === 'INFO') return true
+  return props.space?.id === store.selectedSpaceId
+})
+
+// 🔑 Режим долга
 const isMandatoryPayment = computed(() => {
-  if (store.pendingAction === 'INFO') return true // Аренда, налоги, штрафы
+  if (store.pendingAction === 'INFO') return true
   if (store.pendingAction === 'CARD' && store.pendingCard?.action === 'pay') return true
   return false
 })
-
-// 🔴 Режим долга ТОЛЬКО для обязательных платежей
 const isDebt = computed(() => isMandatoryPayment.value && !canAfford.value)
+
+// 🔑 Динамическая проверка домов в цветовой группе
+const hasHousesInColorGroup = computed(() => {
+  if (!props.space?.color || !myId.value || props.space.type !== 'property') return false
+  const me = store.players.find(p => p.id === myId.value)
+  if (!me) return false
+  for (const id of me.properties) {
+    const s = getSpaceById(id)
+    if (s?.color === props.space.color && (me.houses?.[id] || 0) > 0) return true
+  }
+  return false
+})
+
+// 🔑 Залог
+const isMortgaged = computed(() => {
+  if (!props.space || !myId.value) return false
+  const me = store.players.find(p => p.id === myId.value)
+  return me?.mortgaged?.includes(props.space.id) || false
+})
+
+const canMortgage = computed(() => {
+  if (!props.space || props.space.type !== 'property') return false
+  const me = store.players.find(p => p.id === myId.value)
+  if (!me || !me.properties.includes(props.space.id)) return false
+  if (isMortgaged.value) return false
+  if ((me.houses?.[props.space.id] || 0) > 0) return false
+  if (hasHousesInColorGroup.value) return false
+  return true
+})
+
+const mortgageValue = computed(() => props.space?.price ? Math.floor(props.space.price / 2) : 0)
+const unmortgageCost = computed(() => Math.ceil(mortgageValue.value * 1.1))
 
 const cardButton = computed(() => {
   const card = store.pendingCard
@@ -60,20 +93,24 @@ const cardButton = computed(() => {
 })
 
 const houseLabels = ['1 дом', '2 дома', '3 дома', '4 дома']
-const isMortgaged = computed(() => {
-  if (!props.space || !myId.value) return false
+
+// 🔑 Ключ для перерисовки кнопок
+const actionKey = computed(() => {
   const me = store.players.find(p => p.id === myId.value)
-  return me?.mortgaged?.includes(props.space.id) || false
+  if (!me) return 'no-me'
+  return `${props.space?.id}-${me.housesBoughtThisTurn}-${me.houses?.[props.space?.id || 0] || 0}-${hasHousesInColorGroup.value}`
 })
-const canMortgage = computed(() => {
-  if (!props.space || props.space.type !== 'property') return false
-  const me = store.players.find(p => p.id === myId.value)
-  if (!me || !me.properties.includes(props.space.id)) return false
-  if (isMortgaged.value) return false
-  return true
+
+// 🔑 Проверка: есть ли у владельца ОБЕ коммуналки (12 и 28)
+const hasFullUtilitySet = computed(() => {
+  if (props.space?.type !== 'utility') return false
+  const owner = props.isMyProperty
+      ? store.players.find(p => p.id === myId.value)
+      : store.players.find(p => p.properties?.includes(props.space?.id || -1))
+
+  if (!owner) return false
+  return owner.properties.includes(12) && owner.properties.includes(28)
 })
-const mortgageValue = computed(() => props.space?.price ? Math.floor(props.space.price / 2) : 0)
-const unmortgageCost = computed(() => Math.ceil(mortgageValue.value * 1.1))
 </script>
 
 <template>
@@ -106,9 +143,10 @@ const unmortgageCost = computed(() => Math.ceil(mortgageValue.value * 1.1))
               </p>
             </div>
 
-            <!-- 🏠 Недвижимость (рисуется ВСЕГДА, если это property) -->
-            <div v-else-if="isProperty" class="space-y-4">
-              <!-- Банкер аренды/оплаты (показывается поверх, если висит INFO) -->
+            <!-- 🏠 Недвижимость / 🚂 ЖД / ⚡ Коммуналки -->
+            <div v-else-if="isProperty || space.type === 'utility'" class="space-y-4">
+
+              <!-- Баннер аренды/оплаты -->
               <div v-if="isActionTarget && store.pendingAction === 'INFO'" class="p-3 bg-blue-50 border border-blue-200 rounded-lg text-center">
                 <div class="text-4xl mb-1">{{ store.pendingInfo?.icon || '💸' }}</div>
                 <h4 class="font-bold text-gray-800">{{ store.pendingInfo?.title }}</h4>
@@ -117,8 +155,13 @@ const unmortgageCost = computed(() => Math.ceil(mortgageValue.value * 1.1))
 
               <!-- Инфо о владении -->
               <div v-if="isPropertyOwned" class="p-3 rounded-lg border" :class="isMyProperty ? 'bg-green-50 border-green-200 text-green-700' : 'bg-blue-50 border-blue-200 text-blue-700'">
-                <div class="flex items-center gap-2 font-semibold"><span>{{ isMyProperty ? '✅' : '🔑' }}</span><span>{{ isMyProperty ? 'Ваша собственность' : `Владелец: ${ownerName || 'Игрок'}` }}</span></div>
-                <div v-if="isMyProperty && currentHouseCount !== undefined" class="text-sm mt-1 pl-6">Зданий: {{ currentHouseCount === 0 ? 'Нет' : currentHouseCount === 5 ? '🏨 Отель' : `🏠 ${currentHouseCount}/4` }}</div>
+                <div class="flex items-center gap-2 font-semibold">
+                  <span>{{ isMyProperty ? '✅' : '🔑' }}</span>
+                  <span>{{ isMyProperty ? 'Ваша собственность' : `Владелец: ${ownerName || 'Игрок'}` }}</span>
+                </div>
+                <div v-if="isMyProperty && currentHouseCount !== undefined && space.type === 'property'" class="text-sm mt-1 pl-6">
+                  Зданий: {{ currentHouseCount === 0 ? 'Нет' : currentHouseCount === 5 ? '🏨 Отель' : `🏠 ${currentHouseCount}/4` }}
+                </div>
                 <div v-if="isMortgaged" class="text-sm mt-1 pl-6 text-gray-500 font-medium">🔒 Улица заложена</div>
               </div>
 
@@ -132,7 +175,7 @@ const unmortgageCost = computed(() => Math.ceil(mortgageValue.value * 1.1))
                 <div v-if="isDebt" class="text-xs text-red-600 font-medium mt-1">🔴 Заложи имущество или предложи обмен</div>
               </div>
 
-              <!-- Таблица аренды -->
+              <!-- 🔑 ТАБЛИЦА АРЕНДЫ (исправленная) -->
               <div class="border-t pt-3">
                 <h4 class="font-semibold mb-2">Аренда:</h4>
 
@@ -144,11 +187,25 @@ const unmortgageCost = computed(() => Math.ceil(mortgageValue.value * 1.1))
                   <div class="flex justify-between"><span>4 станции</span><span class="font-mono">200₽</span></div>
                 </div>
 
-                <!-- ⚡ Коммунальные предприятия -->
-                <div v-else-if="space.type === 'utility'" class="text-sm space-y-1 text-gray-600">
-                  <p>📏 1 предприятие: Сумма кубиков × 4</p>
-                  <p>📏 2 предприятия: Сумма кубиков × 10</p>
-                  <p class="mt-1 font-semibold text-gray-800">Текущая к оплате: {{ requiredAmount || '...' }}₽</p>
+                <!-- ⚡ Коммунальные предприятия (исправлено) -->
+                <div v-else-if="space.type === 'utility'" class="text-sm space-y-2">
+                  <div class="p-2 rounded bg-gray-50 border" :class="hasFullUtilitySet ? 'border-green-400 bg-green-50' : 'border-gray-200'">
+                    <p class="flex justify-between">
+                      <span>📏 1 предприятие:</span>
+                      <span class="font-mono">Сумма кубиков × 4</span>
+                    </p>
+                    <p class="flex justify-between mt-1" :class="hasFullUtilitySet ? 'text-green-700 font-semibold' : ''">
+                      <span>📏 2 предприятия:</span>
+                      <span class="font-mono">Сумма кубиков × 10</span>
+                    </p>
+                  </div>
+                  <!-- 🔑 Визуальный индикатор монополии -->
+                  <div v-if="hasFullUtilitySet" class="text-xs text-center text-green-600 font-medium flex items-center justify-center gap-1">
+                    ✅ Полный комплект: аренда ×10
+                  </div>
+                  <p class="mt-1 text-xs text-gray-500">
+                    Текущая к оплате: <span class="font-semibold text-gray-700">{{ requiredAmount || '...' }}₽</span>
+                  </p>
                 </div>
 
                 <!-- 🏠 Обычные улицы -->
@@ -170,21 +227,35 @@ const unmortgageCost = computed(() => Math.ceil(mortgageValue.value * 1.1))
                 </template>
               </div>
 
-              <!-- Управление (только если не активное действие) -->
-              <div v-if="isMyProperty && space.type === 'property'" class="pt-2 border-t space-y-2">
+              <!-- 🔑 Управление (только для property, НЕ для utility/railroad) -->
+              <div v-if="isMyProperty && space.type === 'property'"
+                   :key="actionKey"
+                   class="pt-2 border-t space-y-2">
                 <div class="flex justify-between text-sm text-gray-500"><span>Стоимость дома</span><span class="font-mono">{{ space.houseCost }}₽</span></div>
                 <div class="flex gap-2">
-                  <button @click="emit('buyHouse')" :disabled="!canBuyHouse" class="flex-1 px-2 py-1.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white text-xs rounded-lg transition">🏠 Купить</button>
+                  <button @click="emit('buyHouse')" :disabled="!canBuyHouse" class="flex-1 px-2 py-1.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white text-xs rounded-lg transition relative group">
+                    🏠 Купить
+                    <span v-if="!canBuyHouse && store.players.find(p => p.id === myId)?.housesBoughtThisTurn"
+                          class="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 bg-gray-900 text-white text-[10px] rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition pointer-events-none">
+                      ⏳ 1 дом за ход
+                    </span>
+                  </button>
                   <button @click="emit('sellHouse')" :disabled="!canSellHouse" class="flex-1 px-2 py-1.5 bg-red-600 hover:bg-red-700 disabled:bg-gray-400 text-white text-xs rounded-lg transition">💰 Продать</button>
                 </div>
                 <div class="flex gap-2 pt-1">
                   <button v-if="!isMortgaged && canMortgage" @click="emit('mortgage')" class="flex-1 px-2 py-1.5 bg-gray-600 hover:bg-gray-700 text-white text-xs rounded-lg transition">🔒 Заложить за {{ mortgageValue }}₽</button>
                   <button v-else-if="isMortgaged" @click="emit('unmortgage')" class="flex-1 px-2 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs rounded-lg transition">🔓 Выкупить за {{ unmortgageCost }}₽</button>
                 </div>
+                <!-- Подсказки -->
+                <div v-if="!canMortgage" class="text-[10px] text-gray-500 text-center">
+                  <span v-if="(space && (store.players.find(p => p.id === myId)?.houses?.[space.id] || 0) > 0)">🏠 Сначала продайте дома на этой улице</span>
+                  <span v-else-if="hasHousesInColorGroup">🏠 Сначала продайте дома на других улицах этого цвета</span>
+                  <span v-else-if="isMortgaged">🔒 Улица уже заложена</span>
+                </div>
               </div>
             </div>
 
-            <!-- ℹ️ Прочие -->
+            <!-- ℹ️ Прочие (налоги) -->
             <div v-else-if="isActionTarget && space.type === 'tax' && requiredAmount" class="p-3 bg-blue-50 border border-blue-200 rounded-lg space-y-2">
               <div class="flex justify-between items-center">
                 <span class="font-semibold">К оплате:</span>
@@ -196,7 +267,6 @@ const unmortgageCost = computed(() => Math.ceil(mortgageValue.value * 1.1))
           </div>
 
           <!-- 🔻 Футер -->
-          <!-- 🔻 Футер -->
           <div class="p-4 bg-gray-50 flex flex-col gap-2 border-t shrink-0">
             <!-- 🔴 РЕЖИМ ДОЛГА -->
             <template v-if="isDebt">
@@ -207,7 +277,7 @@ const unmortgageCost = computed(() => Math.ceil(mortgageValue.value * 1.1))
               <p class="text-xs text-gray-500 text-center">💡 Закрой окно, заложи имущество или предложи обмен</p>
             </template>
 
-            <!-- 🟢 АКТИВНОЕ ДЕЙСТВИЕ (покупка/карта/аренда) -->
+            <!-- 🟢 АКТИВНОЕ ДЕЙСТВИЕ -->
             <template v-else-if="isActionTarget">
               <div v-if="store.pendingAction === 'BUY'" class="flex gap-3">
                 <button @click="emit('buy')" :disabled="!canAfford" class="flex-1 px-4 py-2.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-semibold rounded-lg transition shadow-sm relative">

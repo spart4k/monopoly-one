@@ -81,12 +81,8 @@ const canBuyHouse = computed(() => {
   // 🔑 БЛОКИРОВКА: нельзя строить на заложенной улице
   if (me.mortgaged?.includes(selectedSpace.value.id)) return false
 
-  // 🔑 БЛОКИРОВКА: нельзя строить, если в группе есть залог (опционально, для строгой игры)
-  // const color = selectedSpace.value.color
-  // const groupHasMortgage = Array.from({ length: 40 }, (_, i) => getSpaceById(i))
-  //   .filter(s => s?.type === 'property' && s?.color === color)
-  //   .some(s => me.mortgaged?.includes(s.id))
-  // if (groupHasMortgage) return false
+  // 🔑 БЛОКИРОВКА: лимит 1 дом за ход
+  if (me.housesBoughtThisTurn) return false
 
   const color = selectedSpace.value.color
   const group = Array.from({ length: 40 }, (_, i) => getSpaceById(i))
@@ -101,19 +97,21 @@ const canBuyHouse = computed(() => {
 
   const others = group.filter(id => id !== selectedSpace.value.id).map(id => me.houses?.[id] || 0)
   const minOthers = others.length ? Math.min(...others) : 0
-  return current <= minOthers && !boughtHouseThisTurn.value
+  return current <= minOthers
 })
 
 const canSellHouse = computed(() => {
   if (!selectedSpace.value || selectedSpace.value.type !== 'property') return false
   const me = store.players.find(p => p.id === myId.value)
-  if (!me || me.isInJail) return false // 🔒 Блокируем, если в тюрьме
-
-  const group = colorGroups[selectedSpace.value.color]
-  if (!group || !group.every(id => me.properties.includes(id))) return false
+  if (!me || !me.properties.includes(selectedSpace.value.id)) return false
 
   const current = me.houses?.[selectedSpace.value.id] || 0
   if (current === 0) return false
+
+  const color = selectedSpace.value.color
+  const group = Array.from({ length: 40 }, (_, i) => getSpaceById(i))
+      .filter(s => s?.type === 'property' && s?.color === color)
+      .map(s => s.id)
 
   const others = group.filter(id => id !== selectedSpace.value.id).map(id => me.houses?.[id] || 0)
   const maxOthers = others.length ? Math.max(...others) : 0
@@ -412,76 +410,89 @@ watch(() => store.logs.length, async () => {
             <p class="text-gray-500 text-sm md:text-base">Ход: <span class="font-semibold text-gray-800">{{ getPlayerName(store.currentTurn) }}</span></p>
 
             <!-- 🧪 Дебаг-селект -->
-            <!-- 🧪 Тестовые сценарии (ВСЕ 40 ячеек) -->
+            <!-- 🧪 Тестовые сценарии (ВСЕ 40 ячеек по boardConfig) -->
             <div class="w-full max-w-xs mt-1">
               <label class="text-[9px] md:text-[10px] font-semibold text-gray-400 mb-0.5 block text-center">🧪 Все ячейки (0-39):</label>
               <select v-model="debugTarget" class="w-full bg-gray-100 border border-gray-300 rounded-lg px-2 py-1 text-[10px] md:text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 max-h-48 overflow-y-auto">
                 <option :value="null">🎲 Случайный бросок</option>
+
                 <optgroup label="🏁 Угловые">
                   <option :value="0">0️⃣ СТАРТ</option>
-                  <option :value="10">🔒 Тюрьма (посещение)</option>
-                  <option :value="20">🚗 Бесплатная парковка</option>
+                  <option :value="10">🔒 ТЮРЬМА</option>
+                  <option :value="20">🚗 БЕСПЛАТНАЯ СТОЯНКА</option>
                   <option :value="30">🚔 ИДИ В ТЮРЬМУ</option>
                 </optgroup>
-                <optgroup label="🟫 Коричневые">
-                  <option :value="1">1️⃣ Ул. Браминская</option>
-                  <option :value="3">3️⃣ Ул. Вокзальная</option>
+
+                <optgroup label="🟤 Коричневые (1, 3)">
+                  <option :value="1">1️⃣ Ленинградская</option>
+                  <option :value="3">3️⃣ Вилоновская</option>
                 </optgroup>
-                <optgroup label="💧 Голубые">
-                  <option :value="6">6️⃣ Пр. Кирова</option>
-                  <option :value="8">8️⃣ Ул. Арцыбушевская</option>
-                  <option :value="9">9️⃣ Ул. Молодогвардейская</option>
+
+                <optgroup label="💧 Голубые (6, 8, 9)">
+                  <option :value="6">6️⃣ пр. Кирова</option>
+                  <option :value="8">8️⃣ ул. Куйбышева</option>
+                  <option :value="9">9️⃣ Мичурина</option>
                 </optgroup>
-                <optgroup label="🌸 Розовые">
-                  <option :value="11">1️⃣1️⃣ Ул. Осипенко</option>
-                  <option :value="13">1️⃣3️ Ул. Аэродромная</option>
-                  <option :value="14">1️⃣4️ Ул. Спортивная</option>
+
+                <optgroup label="🌸 Розовые (11, 13, 14)">
+                  <option :value="11">1️⃣1️⃣ Галактионовская</option>
+                  <option :value="13">1️⃣3️⃣ Купеческая</option>
+                  <option :value="14">1️⃣4️⃣ Некрасовская</option>
                 </optgroup>
-                <optgroup label="🟠 Оранжевые">
-                  <option :value="16">1️⃣6️⃣ Ул. Братьев Коростылевых</option>
-                  <option :value="18">1️⃣8️⃣ Пр. Ленина</option>
-                  <option :value="19">1️⃣9️⃣ Ул. Полевая</option>
+
+                <optgroup label="🟠 Оранжевые (16, 18, 19)">
+                  <option :value="16">1️⃣6️⃣ ул. Полевая</option>
+                  <option :value="18">1️⃣8️⃣ Братьев Коростылевых</option>
+                  <option :value="19">1️⃣9️⃣ Красноармейская</option>
                 </optgroup>
-                <optgroup label="🔴 Красные">
-                  <option :value="21">2️⃣1️ Ул. Куйбышева</option>
-                  <option :value="23">2️⃣3️⃣ Ул. Галактионовская</option>
-                  <option :value="24">2️⃣4️⃣ Ул. Советской Армии</option>
+
+                <optgroup label="🔴 Красные (21, 23, 24)">
+                  <option :value="21">2️⃣1️⃣ ул. Осипенко</option>
+                  <option :value="23">2️⃣3️⃣ ул. Садовая</option>
+                  <option :value="24">2️⃣4️⃣ Аэродромная</option>
                 </optgroup>
-                <optgroup label="🟡 Жёлтые">
-                  <option :value="26">2️⃣6️⃣ Пл. Кирова</option>
-                  <option :value="27">2️⃣7️⃣ Ул. Фрунзе</option>
-                  <option :value="29">2️⃣9️⃣ Ул. Чапаевская</option>
+
+                <optgroup label="🟡 Жёлтые (26, 27, 29)">
+                  <option :value="26">2️⃣6️⃣ пр. Ленина</option>
+                  <option :value="27">2️⃣7️⃣ ул. Спортивная</option>
+                  <option :value="29">2️⃣9️⃣ Арцыбушевская</option>
                 </optgroup>
-                <optgroup label="🟢 Зелёные">
-                  <option :value="31">3️⃣1️⃣ Ул. Ленинградская</option>
-                  <option :value="32">3️⃣2️⃣ Ул. Московская</option>
-                  <option :value="34">3️⃣4️⃣ Пр. Карла Маркса</option>
+
+                <optgroup label="🟢 Зелёные (31, 32, 34)">
+                  <option :value="31">3️⃣1️⃣ ул. Ново-Садовая</option>
+                  <option :value="32">3️⃣2️⃣ ул. Стара-Загора</option>
+                  <option :value="34">3️⃣4️⃣ ул. Мичурина</option>
                 </optgroup>
-                <optgroup label="🔵 Синие">
-                  <option :value="37">3️⃣7️⃣ Ул. Садовая</option>
-                  <option :value="39">3️⃣9️ Набережная</option>
+
+                <optgroup label="🔵 Синие (37, 39)">
+                  <option :value="37">3️⃣7️⃣ ул. Фрунзе</option>
+                  <option :value="39">3️⃣9️⃣ ул. Советской Армии</option>
                 </optgroup>
+
                 <optgroup label="🚂 Транспорт">
-                  <option :value="5">5️⃣ ЖД Вокзал Северный</option>
-                  <option :value="15">1️⃣5️⃣ ЖД Вокзал Южный</option>
-                  <option :value="25">2️⃣5️⃣ Аэропорт</option>
-                  <option :value="35">3️⃣5️ ЖД Вокзал Западный</option>
+                  <option :value="5">5️⃣ ЖД Вокзал</option>
+                  <option :value="15">1️⃣5️⃣ Речной Вокзал</option>
+                  <option :value="25">2️⃣5️⃣ Автовокзал</option>
+                  <option :value="35">3️⃣5️⃣ Аэропорт Курумоч</option>
                 </optgroup>
+
                 <optgroup label="⚡ Коммуналки">
-                  <option :value="12">⚡ Электросеть</option>
-                  <option :value="28">💧 Водоканал</option>
+                  <option :value="12">1️⃣2️⃣ Водоканал</option>
+                  <option :value="28">2️⃣8️⃣ Электросети</option>
                 </optgroup>
+
                 <optgroup label="🃏 Карты">
                   <option :value="2">2️⃣ Казна</option>
                   <option :value="7">7️⃣ Шанс</option>
-                  <option :value="17">1️⃣7️ Казна</option>
+                  <option :value="17">1️⃣7️⃣ Казна</option>
                   <option :value="22">2️⃣2️⃣ Шанс</option>
-                  <option :value="33">3️⃣3️ Казна</option>
+                  <option :value="33">3️⃣3️⃣ Казна</option>
                   <option :value="36">3️⃣6️⃣ Шанс</option>
                 </optgroup>
+
                 <optgroup label="📉 Налоги">
-                  <option :value="4">4️⃣ Налог (200₽)</option>
-                  <option :value="38">3️⃣8️⃣ Налог (100₽)</option>
+                  <option :value="4">4️⃣ Подоходный налог</option>
+                  <option :value="38">3️⃣8️⃣ Налог на роскошь</option>
                 </optgroup>
               </select>
             </div>

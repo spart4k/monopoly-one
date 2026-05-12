@@ -18,6 +18,7 @@ export type Player = {
   jailCards: number
   consecutiveDoubles: number
   isReady?: boolean
+  housesBoughtThisTurn: boolean
 }
 
 export type RoomState = {
@@ -96,6 +97,7 @@ export class Room {
       jailTurns: 0,
       jailCards: 0,
       consecutiveDoubles: 0,
+      housesBoughtThisTurn: false,
       isReady: isFirst,
     }
     this.state.players.push(newP)
@@ -135,6 +137,10 @@ export class Room {
 
   // 🔹 Завершение хода
   finishTurn() {
+    // 🔑 Сбрасываем лимит домов для текущего игрока
+    const currentPlayer = this.getPlayer(this.state.currentTurn)
+    if (currentPlayer) currentPlayer.housesBoughtThisTurn = false
+
     const idx = this.state.players.findIndex(p => p.id === this.state.currentTurn)
     const nextPlayer = this.state.players[(idx + 1) % this.state.players.length]
     this.state.currentTurn = nextPlayer?.id || ''
