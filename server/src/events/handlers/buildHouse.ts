@@ -18,6 +18,9 @@ const COLOR_GROUPS: Record<string, number[]> = {
 export function handleBuyHouse(room: Room, playerId: string, spaceId: number, roomViews: Map<string, RoomView>) {
   const player = room.getPlayer(playerId)
   if (!player) return { error: 'Player not found' }
+  if (player.mortgaged?.includes(spaceId)) {
+    return { error: '🔒 Сначала выкупите улицу из залога' }
+  }
   if (room.state.currentTurn !== playerId) return { error: 'Не ваш ход' }
   if (player.isInJail) return { error: '🔒 Нельзя покупать дома в тюрьме' } // ✅
 

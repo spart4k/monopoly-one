@@ -1,7 +1,14 @@
 // client/src/lib/ws.ts
+import { ref } from 'vue'
+import {useSession} from "../composables/useSession.ts";
+const { myId, roomId } = useSession()
+
 let ws: WebSocket | null = null
 let reconnectAttempts = 0
 const MAX_RECONNECT = 5
+
+// 🔑 Реактивный статус подключения (для UI)
+export const isConnected = ref(false)
 
 export function initWs(
   url: string,
@@ -22,8 +29,25 @@ export function initWs(
     }
 
     ws.onopen = () => {
-      console.log('✅ [WS] Connected! readyState:', ws?.readyState)
-      reconnectAttempts = 0
+      isConnected.value = true
+      console.log('✅ [WS] Connected!')
+
+      // 🔑 Авто-вход, если сессия есть
+      const storedId = sessionStorage.getItem('monopoly_playerId')
+      const storedRoom = sessionStorage.getItem('monopoly_roomId')
+      const storedName = sessionStorage.getItem('monopoly_playerName')
+
+      if (storedId && storedRoom) {
+        console.log('🔄 [WS] Auto-rejoining:', storedId, 'in room', storedRoom)
+        ws?.send(JSON.stringify({
+          type: 'JOIN_ROOM',
+          playerId: storedId,
+          roomId: storedRoom,
+          name: storedName || 'Reconnecting'
+        }))
+      } else {
+        ws?.send(JSON.stringify({ type: 'GET_LOBBY' }))
+      }
     }
 
     ws.onmessage = (event) => {
@@ -42,6 +66,7 @@ export function initWs(
     ws.onclose = (e) => {
       console.log(`🔌 [WS] Closed (code=${e.code}, reason=${e.reason || 'none'})`)
       ws = null
+      isConnected.value = false // 🔑 Обновляем статус
       scheduleReconnect()
       onClose?.()
     }
@@ -54,6 +79,7 @@ export function initWs(
   const scheduleReconnect = () => {
     if (reconnectAttempts >= MAX_RECONNECT) {
       console.error('🚫 [WS] Max reconnect attempts reached')
+      isConnected.value = false
       return
     }
     reconnectAttempts++
@@ -77,6 +103,7 @@ export function initWs(
     close: () => {
       console.log('🔌 [WS] Manual close')
       reconnectAttempts = MAX_RECONNECT
+      isConnected.value = false
       if (ws) { ws.close(); ws = null }
     },
     getReadyState: () => ws?.readyState ?? 3
@@ -85,7 +112,14 @@ export function initWs(
 
 export function sendEvent(data: any) {
   if (ws?.readyState === 1) {
-    ws.send(JSON.stringify(data))
+    const payload = {
+      ...data,
+      playerId: myId.value || data.playerId,
+      // 🔑 КРИТИЧНО: явный ввод (data.roomId) имеет приоритет над кэшем
+      roomId: data.roomId || roomId.value
+    }
+    console.log('📤 [WS] Sending:', payload.type, 'roomId:', payload.roomId)
+    ws.send(JSON.stringify(payload))
     return true
   }
   console.warn('⚠️ [WS] sendEvent: not connected')

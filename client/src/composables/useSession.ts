@@ -1,19 +1,34 @@
 // client/src/composables/useSession.ts
 import { ref } from 'vue'
 
-export function useSession() {
-  // 🔑 Загружаем СИНХРОННО. myId будет доступен сразу при монтировании компонента
-  const myId = ref<string | null>(
-    localStorage.getItem('monopoly_player_id') || `p_${Math.random().toString(36).slice(2, 8)}`
-  )
-  const myName = ref<string>(localStorage.getItem('monopoly_username') || '')
+const storedId = sessionStorage.getItem('monopoly_playerId')
+const storedRoom = sessionStorage.getItem('monopoly_roomId')
+const storedName = sessionStorage.getItem('monopoly_playerName') // 🔑 NEW
 
-  const save = (id: string, name: string) => {
-    localStorage.setItem('monopoly_player_id', id)
-    localStorage.setItem('monopoly_username', name)
+export const myId = ref<string | null>(storedId)
+export const roomId = ref<string | null>(storedRoom)
+export const playerName = ref<string | null>(storedName) // 🔑 NEW
+
+export function useSession() {
+  const setSession = (id: string, room: string, name?: string) => {
     myId.value = id
-    myName.value = name
+    roomId.value = room
+    if (name) {
+      playerName.value = name
+      sessionStorage.setItem('monopoly_playerName', name)
+    }
+    sessionStorage.setItem('monopoly_playerId', id)
+    sessionStorage.setItem('monopoly_roomId', room)
   }
 
-  return { myId, myName, save }
+  const clearSession = () => {
+    myId.value = null
+    roomId.value = null
+    playerName.value = null
+    sessionStorage.removeItem('monopoly_playerId')
+    sessionStorage.removeItem('monopoly_roomId')
+    sessionStorage.removeItem('monopoly_playerName')
+  }
+
+  return { myId, roomId, playerName, setSession, clearSession }
 }

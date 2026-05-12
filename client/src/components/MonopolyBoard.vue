@@ -1,6 +1,6 @@
 <!-- client/src/components/MonopolyBoard.vue -->
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useGameStore } from '../stores/game'
 import { useSession } from '../composables/useSession'
 import { getSpaceById } from '../shared/boardConfig'
@@ -23,30 +23,27 @@ const isTrading = computed(() => {
   return t.initiator === myId.value || t.status !== 'draft'
 })
 
-const isMyTurn = computed(() => !!store.currentTurn && !!myId.value && store.currentTurn === myId.value)
+const isMyTurn = computed(() => {
+  // 🔑 Форс-восстановление myId из sessionStorage, если ref ещё пуст
+  if (!myId.value && typeof window !== 'undefined') {
+    const stored = sessionStorage.getItem('monopoly_playerId')
+    if (stored) {
+      console.log('🔄 [BOARD] Restoring myId from sessionStorage:', stored)
+      myId.value = stored
+    }
+  }
+
+  if (!myId.value || !store.currentTurn) return false
+  return store.currentTurn === myId.value
+})
+
 const currentPlayer = computed(() => store.players.find(p => p.id === store.currentTurn))
 const isInJail = computed(() => currentPlayer.value?.isInJail || false)
 
 const hoveredOwnerId = ref<string | null>(null)
 const hoveredGroupColor = ref<string | null>(null)
 const selectedSpace = ref<ISpaceData | null>(null)
-
-watch(
-    [() => store.pendingAction, () => store.selectedSpaceId, () => store.pendingCard],
-    ([action, spaceId, card]) => {
-      // 👈 ГЛАВНЫЙ ФИКС: модалки открываются ТОЛЬКО у того, чей сейчас ход
-      if (!isMyTurn.value) return
-
-      if (action === 'BUY' && spaceId !== null && spaceId !== -1) {
-        const data = getSpaceById(spaceId)
-        if (data) { selectedSpace.value = data; showModal.value = true }
-      } else if (action === 'INFO') {
-        showModal.value = true
-      } else if (action === 'CARD' && card) {
-        showModal.value = true
-      }
-    }
-)
+const showModal = ref(false)
 
 // При смене хода закрываем модалку и чистим локальный UI-стейт
 watch(() => store.currentTurn, (newTurn, oldTurn) => {
@@ -56,7 +53,10 @@ watch(() => store.currentTurn, (newTurn, oldTurn) => {
   }
 })
 
-const showModal = ref(false)
+watch([() => store.currentTurn, () => myId.value], ([turn, id]) => {
+  console.log(`🔄 [BOARD] currentTurn: ${turn}, myId: ${id}, isMyTurn: ${turn === id}`)
+}, { immediate: true })
+
 const debugTarget = ref<number | null>(null)
 const chatContainer = ref<HTMLElement | null>(null)
 const boughtHouseThisTurn = ref(false)
@@ -76,10 +76,24 @@ try {
 const canBuyHouse = computed(() => {
   if (!selectedSpace.value || selectedSpace.value.type !== 'property') return false
   const me = store.players.find(p => p.id === myId.value)
-  if (!me || me.isInJail) return false // 🔒 Блокируем, если в тюрьме
+  if (!me || me.isInJail) return false
 
-  const group = colorGroups[selectedSpace.value.color]
-  if (!group || !group.every(id => me.properties.includes(id))) return false
+  // 🔑 БЛОКИРОВКА: нельзя строить на заложенной улице
+  if (me.mortgaged?.includes(selectedSpace.value.id)) return false
+
+  // 🔑 БЛОКИРОВКА: нельзя строить, если в группе есть залог (опционально, для строгой игры)
+  // const color = selectedSpace.value.color
+  // const groupHasMortgage = Array.from({ length: 40 }, (_, i) => getSpaceById(i))
+  //   .filter(s => s?.type === 'property' && s?.color === color)
+  //   .some(s => me.mortgaged?.includes(s.id))
+  // if (groupHasMortgage) return false
+
+  const color = selectedSpace.value.color
+  const group = Array.from({ length: 40 }, (_, i) => getSpaceById(i))
+      .filter(s => s?.type === 'property' && s?.color === color)
+      .map(s => s.id)
+
+  if (!group.every(id => me.properties.includes(id))) return false
   if (me.money < (selectedSpace.value.houseCost || 100)) return false
 
   const current = me.houses?.[selectedSpace.value.id] || 0
@@ -141,10 +155,95 @@ const getPos = (i: number) => {
   return { row: 41 - i, col: 1 }
 }
 
+// 🔑 Плавная анимация фишек
+const visualPos = ref<Record<string, number>>({})
+const animating = ref<Record<string, boolean>>({})
+const animationTimeouts: NodeJS.Timeout[] = []
+
+// Инициализация при монтировании
+onMounted(() => {
+  store.players.forEach(p => visualPos.value[p.id] = p.pos)
+})
+
+// Очистка таймеров при уходе со страницы
+onBeforeUnmount(() => animationTimeouts.forEach(clearTimeout))
+
+// 🎯 Слежение ТОЛЬКО за изменениями позиций
+watch(
+    () => store.players.map(p => ({ id: p.id, pos: p.pos })),
+    (states) => {
+      states.forEach(({ id, pos }) => {
+        if (pos === undefined || pos === null) return
+        const currentVisual = visualPos.value[id]
+        // Запускаем анимацию только если целевая позиция отличается от текущей визуальной
+        if (pos !== currentVisual && !animating.value[id]) {
+          animateAlongPath(id, currentVisual, pos)
+        }
+      })
+    }
+)
+
+// 🛤 Вычисление пути по периметру (по часовой стрелке, 0→39)
+const getPath = (from: number, to: number): number[] => {
+  const path = []
+  let cur = from
+  while (cur !== to) {
+    cur = (cur + 1) % 40
+    path.push(cur)
+  }
+  return path
+}
+
+// 🎬 Пошаговая анимация
+const animateAlongPath = async (id: string, from: number, to: number) => {
+  animating.value[id] = true
+  const path = getPath(from, to)
+  const stepDuration = 60 // мс на клетку (можно уменьшить для ускорения)
+
+  for (const pos of path) {
+    visualPos.value[id] = pos
+    await new Promise<void>(resolve => {
+      const t = setTimeout(resolve, stepDuration)
+      animationTimeouts.push(t)
+    })
+  }
+  animating.value[id] = false
+}
+
+// 🎨 Стили для фишки (берут визуальную позицию)
+const getTokenStyle = (id: string) => {
+  const pos = visualPos.value[id] ?? 0
+  const grid = getPos(pos)
+  if (!grid) return {}
+
+  // Базовый центр клетки в %
+  const colPct = (grid.col - 1) * (100 / 13)
+  const rowPct = (grid.row - 1) * (100 / 9)
+  const left = colPct + (100 / 13 / 2)
+  const top = rowPct + (100 / 9 / 2)
+
+  // Смещение при наложении нескольких фишек на одну клетку
+  const playersHere = store.players.filter(pl => visualPos.value[pl.id] === pos)
+  const idx = playersHere.findIndex(pl => pl.id === id)
+  const offX = (idx % 3 - 1) * 1.8
+  const offY = Math.floor(idx / 3) * 1.8
+
+  return {
+    position: 'absolute',
+    left: `${left + offX}%`,
+    top: `${top + offY}%`,
+    transform: 'translate(-50%, -50%)',
+    // ⚡ CSS-transition синхронизирован с stepDuration
+    transition: `left 0.06s linear, top 0.06s linear`,
+    zIndex: 20 + idx
+  }
+}
+
 const rollDice = () => {
   if (!myId.value || !isMyTurn.value) return
   if (store.status !== 'PLAYING') return
   if (store.pendingAction && store.pendingAction !== 'DOUBLE_TURN') return
+  if (animating.value[myId.value]) return // 🔒 Игрок не может кинуть, пока фишка летит
   sendEvent({ type: 'ROLL_DICE', playerId: myId.value, targetSpaceId: debugTarget.value || undefined })
 }
 
@@ -174,20 +273,44 @@ const getPendingText = () => {
   }
 }
 
-watch(() => store.pendingAction, (action) => {
-  if (!action || !isMyTurn.value) return
-  if (action === 'DOUBLE_TURN') return
-  if (action === 'BUY' && store.selectedSpaceId !== null) {
-    const data = getSpaceById(store.selectedSpaceId)
+const actionQueue = ref<{ type: string; spaceId?: number } | null>(null)
+
+// Замени старый watch(() => store.pendingAction...) на этот блок:
+watch([() => store.pendingAction, () => store.selectedSpaceId], ([action, spaceId]) => {
+  if (!action || action === 'DOUBLE_TURN' || !isMyTurn.value) return
+
+  // Если фишка ещё движется → откладываем открытие модалки
+  if (animating.value[myId.value]) {
+    actionQueue.value = { type: action, spaceId: spaceId ?? undefined }
+    return
+  }
+  openModalByAction(action, spaceId)
+})
+
+// Срабатывает ровно в момент завершения анимации
+watch(() => animating.value[myId.value], (isAnimating) => {
+  if (!isAnimating && actionQueue.value) {
+    openModalByAction(actionQueue.value.type, actionQueue.value.spaceId)
+    actionQueue.value = null
+  }
+})
+
+function openModalByAction(action: string, spaceId?: number) {
+  if (action === 'BUY' && spaceId != null) {
+    const data = getSpaceById(spaceId)
     if (data) { selectedSpace.value = data; showModal.value = true }
   } else if (action === 'CARD') {
+    store.selectedSpaceId = 7 // 🔑 КРИТИЧНО: синхронизируем ID с isActionTarget
     selectedSpace.value = { id: 7, name: '🃏 Событие', type: 'chance', color: 'bg-orange-200', textColor: 'text-orange-900', price: 0, baseRent: 0, rentWithHouse: [0,0,0,0], rentWithHotel: 0, houseCost: 0, mortgageValue: 0 }
     showModal.value = true
   } else if (action === 'INFO') {
-    selectedSpace.value = { id: -1, name: '', type: 'go', color: 'bg-gray-200', textColor: 'text-gray-800', price: 0, baseRent: 0, rentWithHouse: [0,0,0,0], rentWithHotel: 0, houseCost: 0, mortgageValue: 0 }
+    // 🔑 Берём ID из стора (гарантированно актуален), fallback на позицию игрока
+    const targetId = store.selectedSpaceId ?? currentPlayer.value?.pos
+    const data = getSpaceById(targetId)
+    if (data) selectedSpace.value = data
     showModal.value = true
   }
-})
+}
 
 watch(() => store.logs.length, async () => {
   await nextTick()
@@ -234,16 +357,17 @@ watch(() => store.logs.length, async () => {
             </div>
 
             <div v-if="ownerMap[space.id]" class="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full ring-1 ring-white/50" :class="store.players.find(p => p.id === ownerMap[space.id])?.color || 'bg-gray-500'"></div>
-            <div class="absolute bottom-0.5 flex gap-0.5">
-              <div v-for="p in store.players.filter(pl => pl.pos === space.id)" :key="p.id"
-                   class="w-3.5 h-3.5 rounded-full border-[1.5px] border-white/90 shadow-md flex items-center justify-center text-[6px] md:text-[7px] font-bold text-white"
-                   :style="{ backgroundColor: getPlayerColorHex(p.color) }" :title="p.name">
-                {{ p.name?.charAt(0).toUpperCase() }}
-              </div>
-            </div>
           </div>
         </div>
 
+        <div class="absolute inset-0 p-1 pointer-events-none">
+          <div v-for="p in store.players" :key="p.id"
+               class="w-4 h-4 md:w-5 md:h-5 rounded-full border-2 border-white/90 shadow-lg flex items-center justify-center text-[8px] font-bold text-white pointer-events-auto cursor-pointer hover:scale-110 transition-transform"
+               :style="[getTokenStyle(p.id), { backgroundColor: getPlayerColorHex(p.color) }]"
+               :title="`${p.name} (💰 ${p.money}₽)`">
+            {{ p.name?.charAt(0).toUpperCase() }}
+          </div>
+        </div>
         <!-- 🔑 Центр доски: занимает col 2-11, row 2-7 (при сетке 12×8) -->
         <!-- 🔑 Центр доски: заменяется на панель обмена, если участвуем в сделке -->
         <div class="col-start-2 col-span-11 row-start-2 row-span-7 rounded-2xl overflow-hidden">
@@ -258,23 +382,17 @@ watch(() => store.logs.length, async () => {
 
             <!-- Кнопки управления -->
             <div class="flex flex-col items-center gap-2 md:gap-3 w-full max-w-xs">
+              <!-- 🔑 Динамическая кнопка: Бросить / Продолжить действие -->
               <button
-                  @click="rollDice"
-                  :disabled="
-                    store.status !== 'PLAYING' ||
-                    !isMyTurn ||
-                    (store.pendingAction !== null && store.pendingAction !== 'DOUBLE_TURN') ||
-                    (isInJail && !store.pendingAction) ||
-                    !isWsReady()
-                  "
+                  @click="store.pendingAction && store.pendingAction !== 'DOUBLE_TURN' ? (showModal = true) : rollDice()"
+                  :disabled="store.status !== 'PLAYING' || !isMyTurn || !isWsReady() || (isInJail && !store.pendingAction)"
                   class="w-full px-4 md:px-5 py-2.5 md:py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-semibold rounded-xl transition active:scale-95 shadow-lg text-base md:text-lg flex items-center justify-center gap-2"
               >
-                <span v-if="isMyTurn">
-                  <template v-if="store.pendingAction === 'DOUBLE_TURN'">🎲 Бросить снова (дубль)!</template>
-                  <template v-else-if="isInJail && !store.pendingAction">🔒 Вы в тюрьме</template>
-                  <template v-else-if="store.pendingAction !== null">⏳ {{ getPendingText() }}</template>
-                  <template v-else>🎲 Бросить кубики</template>
+                <span v-if="store.pendingAction && store.pendingAction !== 'DOUBLE_TURN'">
+                  📋 {{ getPendingText() }}
                 </span>
+                <span v-else-if="isInJail && !store.pendingAction">🔒 Вы в тюрьме</span>
+                <span v-else-if="isMyTurn">🎲 Бросить кубики</span>
                 <span v-else>⏳ Ждите хода: {{ getPlayerName(store.currentTurn) }}</span>
               </button>
 
@@ -294,11 +412,77 @@ watch(() => store.logs.length, async () => {
             <p class="text-gray-500 text-sm md:text-base">Ход: <span class="font-semibold text-gray-800">{{ getPlayerName(store.currentTurn) }}</span></p>
 
             <!-- 🧪 Дебаг-селект -->
+            <!-- 🧪 Тестовые сценарии (ВСЕ 40 ячеек) -->
             <div class="w-full max-w-xs mt-1">
-              <label class="text-[9px] md:text-[10px] font-semibold text-gray-400 mb-0.5 block text-center">🧪 Тест-сценарии:</label>
-              <select v-model="debugTarget" class="w-full bg-gray-100 border border-gray-300 rounded-lg px-2 py-1 text-[10px] md:text-xs focus:outline-none focus:ring-1 focus:ring-blue-500">
+              <label class="text-[9px] md:text-[10px] font-semibold text-gray-400 mb-0.5 block text-center">🧪 Все ячейки (0-39):</label>
+              <select v-model="debugTarget" class="w-full bg-gray-100 border border-gray-300 rounded-lg px-2 py-1 text-[10px] md:text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 max-h-48 overflow-y-auto">
                 <option :value="null">🎲 Случайный бросок</option>
-                <!-- ... оставь остальные опции без изменений ... -->
+                <optgroup label="🏁 Угловые">
+                  <option :value="0">0️⃣ СТАРТ</option>
+                  <option :value="10">🔒 Тюрьма (посещение)</option>
+                  <option :value="20">🚗 Бесплатная парковка</option>
+                  <option :value="30">🚔 ИДИ В ТЮРЬМУ</option>
+                </optgroup>
+                <optgroup label="🟫 Коричневые">
+                  <option :value="1">1️⃣ Ул. Браминская</option>
+                  <option :value="3">3️⃣ Ул. Вокзальная</option>
+                </optgroup>
+                <optgroup label="💧 Голубые">
+                  <option :value="6">6️⃣ Пр. Кирова</option>
+                  <option :value="8">8️⃣ Ул. Арцыбушевская</option>
+                  <option :value="9">9️⃣ Ул. Молодогвардейская</option>
+                </optgroup>
+                <optgroup label="🌸 Розовые">
+                  <option :value="11">1️⃣1️⃣ Ул. Осипенко</option>
+                  <option :value="13">1️⃣3️ Ул. Аэродромная</option>
+                  <option :value="14">1️⃣4️ Ул. Спортивная</option>
+                </optgroup>
+                <optgroup label="🟠 Оранжевые">
+                  <option :value="16">1️⃣6️⃣ Ул. Братьев Коростылевых</option>
+                  <option :value="18">1️⃣8️⃣ Пр. Ленина</option>
+                  <option :value="19">1️⃣9️⃣ Ул. Полевая</option>
+                </optgroup>
+                <optgroup label="🔴 Красные">
+                  <option :value="21">2️⃣1️ Ул. Куйбышева</option>
+                  <option :value="23">2️⃣3️⃣ Ул. Галактионовская</option>
+                  <option :value="24">2️⃣4️⃣ Ул. Советской Армии</option>
+                </optgroup>
+                <optgroup label="🟡 Жёлтые">
+                  <option :value="26">2️⃣6️⃣ Пл. Кирова</option>
+                  <option :value="27">2️⃣7️⃣ Ул. Фрунзе</option>
+                  <option :value="29">2️⃣9️⃣ Ул. Чапаевская</option>
+                </optgroup>
+                <optgroup label="🟢 Зелёные">
+                  <option :value="31">3️⃣1️⃣ Ул. Ленинградская</option>
+                  <option :value="32">3️⃣2️⃣ Ул. Московская</option>
+                  <option :value="34">3️⃣4️⃣ Пр. Карла Маркса</option>
+                </optgroup>
+                <optgroup label="🔵 Синие">
+                  <option :value="37">3️⃣7️⃣ Ул. Садовая</option>
+                  <option :value="39">3️⃣9️ Набережная</option>
+                </optgroup>
+                <optgroup label="🚂 Транспорт">
+                  <option :value="5">5️⃣ ЖД Вокзал Северный</option>
+                  <option :value="15">1️⃣5️⃣ ЖД Вокзал Южный</option>
+                  <option :value="25">2️⃣5️⃣ Аэропорт</option>
+                  <option :value="35">3️⃣5️ ЖД Вокзал Западный</option>
+                </optgroup>
+                <optgroup label="⚡ Коммуналки">
+                  <option :value="12">⚡ Электросеть</option>
+                  <option :value="28">💧 Водоканал</option>
+                </optgroup>
+                <optgroup label="🃏 Карты">
+                  <option :value="2">2️⃣ Казна</option>
+                  <option :value="7">7️⃣ Шанс</option>
+                  <option :value="17">1️⃣7️ Казна</option>
+                  <option :value="22">2️⃣2️⃣ Шанс</option>
+                  <option :value="33">3️⃣3️ Казна</option>
+                  <option :value="36">3️⃣6️⃣ Шанс</option>
+                </optgroup>
+                <optgroup label="📉 Налоги">
+                  <option :value="4">4️⃣ Налог (200₽)</option>
+                  <option :value="38">3️⃣8️⃣ Налог (100₽)</option>
+                </optgroup>
               </select>
             </div>
           </div>
@@ -310,6 +494,7 @@ watch(() => store.logs.length, async () => {
         :is-open="showModal"
         :space="selectedSpace"
         :action-required="store.pendingAction !== null"
+        :required-amount="store.pendingAction === 'BUY' ? selectedSpace?.price : (store.pendingInfo?.amount || 0)"
         :my-money="store.players.find(p => p.id === myId)?.money"
         :is-property-owned="selectedSpace ? store.players.some(p => p.properties?.includes(selectedSpace?.id ?? -1)) : false"
         :owner-name="selectedSpace ? store.players.find(p => p.properties?.includes(selectedSpace?.id ?? -1))?.name : undefined"
@@ -319,12 +504,12 @@ watch(() => store.logs.length, async () => {
         :can-sell-house="canSellHouse"
         @buy="handleBuyProperty"
         @pass="handlePassAction"
-        @roll-for-jail="handleJailRoll"
-        @pay-jail-fine="handlePayJailFine"
-        @use-jail-card="handleUseJailCard"
-        @buy-house="selectedSpace && handleBuyHouse(selectedSpace.id)"
-        @sell-house="selectedSpace && handleSellHouse(selectedSpace.id)"
-        @close="showModal = false; store.clearPendingAction()"
+        @buy-house="selectedSpace && sendEvent({ type: 'BUY_HOUSE', playerId: myId, spaceId: selectedSpace.id })"
+        @sell-house="selectedSpace && sendEvent({ type: 'SELL_HOUSE', playerId: myId, spaceId: selectedSpace.id })"
+        @mortgage="selectedSpace && sendEvent({ type: 'MORTGAGE_PROPERTY', playerId: myId, spaceId: selectedSpace.id })"
+        @unmortgage="selectedSpace && sendEvent({ type: 'UNMORTGAGE_PROPERTY', playerId: myId, spaceId: selectedSpace.id })"
+        @bankrupt="selectedSpace && sendEvent({ type: 'BANKRUPTCY', playerId: myId, spaceId: selectedSpace.id })"
+        @close="showModal = false"
     />
   </div>
 </template>

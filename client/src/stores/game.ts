@@ -41,6 +41,18 @@ export const useGameStore = defineStore('game', () => {
           pendingCard.value = event.card || { text: 'Карта вытянута', action: 'move' }
           pendingAction.value = 'CARD'
           break
+        case 'MY_ID':
+          // 🔑 Сервер явно сказал нам наш ID → сохраняем
+          if (event.playerId && event.roomId) {
+            console.log('✅ [STORE] Received MY_ID:', event.playerId)
+            // Используем useSession напрямую, если он импортирован
+            // Или просто обновляем локальный стейт, если сессия управляется отдельно
+            if (typeof window !== 'undefined') {
+              sessionStorage.setItem('monopoly_playerId', event.playerId)
+              sessionStorage.setItem('monopoly_roomId', event.roomId)
+            }
+          }
+          break
         case 'OFFER_BUY':
           pendingAction.value = 'BUY'
           selectedSpaceId.value = event.spaceId
@@ -48,6 +60,7 @@ export const useGameStore = defineStore('game', () => {
         case 'ACTION_REQUIRED':
           pendingAction.value = 'INFO'
           pendingInfo.value = event
+          selectedSpaceId.value = event.spaceId ?? null // 🔑 Запоминаем ID ячейки действия
           break
         case 'DOUBLE_ROLLED': pendingAction.value = 'DOUBLE_TURN'; break
         case 'ERROR': console.warn('⚠️ STORE ERROR:', event.message); logs.value.unshift(`❌ ${event.message}`); break

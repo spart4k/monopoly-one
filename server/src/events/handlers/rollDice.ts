@@ -82,7 +82,7 @@ export function handleRollDice(room: Room, playerId: string, roomViews: Map<stri
   room.state.lastRollWasDouble = isDouble
 
   // 💰 Проход через СТАРТ
-  if (finalPos < oldPos && finalPos !== 0) {
+  if (finalPos < oldPos || finalPos === 0) {
     player.money += 200
     room.addLog(`💰 ${player.name} получил 200₽ за СТАРТ`)
   }
@@ -130,10 +130,18 @@ export function handleRollDice(room: Room, playerId: string, roomViews: Map<stri
         room.addLog(`💸 ${player.name} заплатил ${paid}₽ аренды ${space.name} ${label}`)
         room.state.actionPending = 'INFO'
         actionRequired = true
-        broadcast(roomViews, room.id, { type: 'ACTION_REQUIRED', title: '💸 Аренда', message: `Вы заплатили ${paid}₽ ${label ? 'за ' + label : ''}`, icon: '💸' })
+        broadcast(roomViews, room.id, {
+          type: 'ACTION_REQUIRED',
+          title: '💸 Аренда',
+          message: `Оплачено ${paid}₽`,
+          icon: '💸',
+          spaceId: space.id,
+          amount: paid // 🔑 Фактическая сумма аренды
+        })
       }
     }
   }
+  // 📉 Налоги
   // 📉 Налоги
   else if (space.type === 'tax') {
     const tax = space.id === 4 ? 200 : 100
@@ -141,7 +149,14 @@ export function handleRollDice(room: Room, playerId: string, roomViews: Map<stri
     room.addLog(`📉 ${player.name} заплатил налог ${tax}₽`)
     room.state.actionPending = 'INFO'
     actionRequired = true
-    broadcast(roomViews, room.id, { type: 'ACTION_REQUIRED', title: '📉 Налог', message: `Налог ${tax}₽ списан`, icon: '📉' })
+    broadcast(roomViews, room.id, {
+      type: 'ACTION_REQUIRED',
+      title: '📉 Налог',
+      message: `Налог ${tax}₽ списан`,
+      icon: '📉',
+      spaceId: space.id,
+      amount: tax // 🔑 КРИТИЧНО: сумма для клиента
+    })
   }
   // 🃏 Карты
   else if (space.type === 'chance' || space.type === 'community') {
@@ -195,9 +210,7 @@ export function handleRollDice(room: Room, playerId: string, roomViews: Map<stri
   }
 
   broadcast(roomViews, room.id, { type: 'PLAYER_MOVED', playerId, from: oldPos, to: player.pos, dice })
-  if (!actionRequired) {
-    broadcast(roomViews, room.id, { type: 'SYNC_STATE', payload: buildSyncPayload(room.state) })
-  }
+  broadcast(roomViews, room.id, { type: 'SYNC_STATE', payload: buildSyncPayload(room.state) })
 
   return { success: true, actionRequired }
 }

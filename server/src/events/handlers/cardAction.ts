@@ -25,11 +25,23 @@ export function handleDrawCard(room: Room, playerId: string, type: string, roomV
   if (!player) return { error: 'Игрок не найден' }
 
   const card = CARDS[Math.floor(Math.random() * CARDS.length)]
+  const oldPos = player.pos // 🔑 Запоминаем позицию ДО перемещения
 
+  // Применяем эффекты карты
   if (card.move !== undefined) {
     player.pos = card.move
+
+    // 🔑 ПРОВЕРКА ПРОХОДА ЧЕРЕЗ СТАРТ (как в rollDice)
+    // Если новая позиция меньше старой (пересечение 39→0) ИЛИ точное попадание на 0
+    if (player.pos < oldPos || player.pos === 0) {
+      player.money += 200
+      room.addLog(`💰 ${player.name} получил 200₽ за СТАРТ (по карте)`)
+    }
+
     room.addLog(`🔀 ${player.name} перемещён на клетку ${card.move}`)
+    broadcast(roomViews, room.id, { type: 'PLAYER_MOVED', playerId, from: oldPos, to: player.pos })
   }
+
   if (card.money) {
     player.money += card.money
     room.addLog(`💰 ${player.name}: ${card.money > 0 ? '+' : ''}${card.money}₽`)
@@ -43,7 +55,6 @@ export function handleDrawCard(room: Room, playerId: string, type: string, roomV
   room.addLog(`🃏 ${player.name}: "${card.text}"`)
   room.state.actionPending = 'CARD'
 
-  // 🔑 Отправляем клиенту полный объект карты для UI
   broadcast(roomViews, room.id, {
     type: 'CARD_DRAWN',
     card: { text: card.text, action: card.action, amount: card.money }

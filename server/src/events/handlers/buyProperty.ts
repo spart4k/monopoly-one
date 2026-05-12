@@ -4,27 +4,33 @@ import type { RoomView } from '../../rooms/RoomManager'
 import { broadcast, buildSyncPayload } from '../../lib/ws-utils'
 import { getSpaceById } from '../../shared/boardConfig'
 
+// 🔹 Логирование для отладки
 function logState(room: Room, action: string, details: string = '') {
-  console.log(`📜 [STATE] ${action} | Room: ${room.id} | Pending: ${room.state.actionPending} | Double: ${room.state.lastRollWasDouble} | Consecutive: ${room.getPlayer(room.state.currentTurn)?.consecutiveDoubles || 0} | ${details}`)
+  const p = room.getPlayer(room.state.currentTurn)
+  console.log(`📜 [STATE] ${action} | Room: ${room.id} | Pending: ${room.state.actionPending} | Double: ${room.state.lastRollWasDouble} | Consecutive: ${p?.consecutiveDoubles || 0} | ${details}`)
 }
 
+// 🔹 Покупка недвижимости
 export function handleBuyProperty(room: Room, playerId: string, spaceId: number, roomViews: Map<string, RoomView>) {
   logState(room, 'BUY_PROPERTY_START')
   const player = room.getPlayer(playerId)
   if (!player) return { error: 'Игрок не найден' }
-  if (room.state.currentTurn !== playerId) return { error: 'Не ваш ход' }
-  if (room.state.actionPending !== 'BUY') return { error: 'Ожидается действие покупки' }
+
+  // 🔑 Проверяем ожидаемое действие, а не только currentTurn (избегаем гонок)
+  if (room.state.actionPending !== 'BUY') return { error: 'Ожидается действие покупки или оно уже завершено' }
+  if (playerId !== room.state.currentTurn) return { error: 'Действие может выполнить только текущий игрок' }
 
   const space = getSpaceById(spaceId)
   if (!space || space.price === undefined) return { error: 'Клетка не найдена' }
   if (player.money < space.price) return { error: 'Недостаточно средств' }
 
+  // Применяем покупку
   player.money -= space.price
   if (!player.properties.includes(spaceId)) player.properties.push(spaceId)
   room.addLog(`🏠 ${player.name} купил ${space.name} за ${space.price}₽`)
   room.state.actionPending = 'NONE'
 
-  // 🔑 Сохраняем право на бросок дубля
+  // 🔑 Если был дубль → сохраняем ход, иначе → передаём
   if (room.state.lastRollWasDouble && player.consecutiveDoubles < 3) {
     room.state.actionPending = 'DOUBLE_TURN'
     logState(room, 'BUY_SUCCESS -> KEEP_TURN (DOUBLE)')
@@ -38,10 +44,14 @@ export function handleBuyProperty(room: Room, playerId: string, spaceId: number,
   return { success: true }
 }
 
+// 🔹 Пропуск действия / завершение модалки
 export function handlePassAction(room: Room, playerId: string, roomViews: Map<string, RoomView>) {
   logState(room, 'PASS_ACTION_START')
   const player = room.getPlayer(playerId)
   if (!player) return { error: 'Игрок не найден' }
+
+  // 🔑 Единое правило: если был дубль и < 3 подряд → ход сохраняется
+  const keepTurn = room.state.lastRollWasDouble && player.consecutiveDoubles < 3
 
   // 1️⃣ Закрытие модалки КАРТЫ
   if (room.state.actionPending === 'CARD') {
@@ -70,11 +80,9 @@ export function handlePassAction(room: Room, playerId: string, roomViews: Map<st
       }
     }
 
-    // 🔑 FIX: Сохраняем ход если до карты выпал дубль
-    if (room.state.lastRollWasDouble && player.consecutiveDoubles < 3) {
+    if (keepTurn) {
       room.state.actionPending = 'DOUBLE_TURN'
-      room.addLog(`🎲 ${player.name} сохраняет ход (дубль до карты)`)
-      logState(room, 'CARD_RESOLVED -> KEEP_TURN (DOUBLE)')
+      room.addLog(`🎲 ${player.name} сохраняет ход (дубль)`)
     } else {
       logState(room, 'CARD_RESOLVED -> PASS_TURN')
       room.finishTurn()
@@ -83,11 +91,18 @@ export function handlePassAction(room: Room, playerId: string, roomViews: Map<st
     return { success: true }
   }
 
-  // 2️⃣ Стандартное завершение
+  // 2️⃣ Закрытие модалок ПОКУПКИ / ИНФО / ДУБЛЯ
   if (['BUY', 'INFO', 'DOUBLE_TURN'].includes(room.state.actionPending)) {
-    logState(room, 'ACTION_PASSED -> FINISH_TURN')
     room.state.actionPending = 'NONE'
-    room.finishTurn()
+
+    if (keepTurn) {
+      room.state.actionPending = 'DOUBLE_TURN'
+      logState(room, 'ACTION_RESOLVED -> KEEP_TURN (DOUBLE)')
+    } else {
+      room.finishTurn()
+      logState(room, 'ACTION_RESOLVED -> FINISH_TURN')
+    }
+
     broadcast(roomViews, room.id, { type: 'SYNC_STATE', payload: buildSyncPayload(room.state) })
     return { success: true }
   }
