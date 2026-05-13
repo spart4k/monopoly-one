@@ -14,7 +14,9 @@ export function buildSyncPayload(state: any, currentPlayerId?: string) {
     })),
     currentTurn: state.currentTurn, logs: state.logs, lastDice: state.lastDice,
     currentPlayerId,
-    activeTrade: state.activeTrade // 🔑 Передаем состояние обмена
+    pendingPayment: state.pendingPayment || null, // 🔑 NEW
+    pendingCard: state.pendingCard,
+    activeTrade: state.activeTrade
   }
 }
 

@@ -33,6 +33,7 @@ export type RoomState = {
   selectedSpaceId: number | null
   pendingCard: any
   pendingInfo: any
+  pendingPayment: { amount: number; creditorId: string | null; type: 'rent' | 'tax' } | null
 }
 
 export type TradeOffer = { properties: number[], money: number, jailCards: number }
@@ -64,6 +65,7 @@ export class Room {
       selectedSpaceId: null,
       pendingCard: null,
       pendingInfo: null,
+      pendingPayment: null,
       ...initialState
     }
   }

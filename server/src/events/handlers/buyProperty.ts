@@ -124,6 +124,39 @@ export function handlePassAction(
     return { success: true }
   }
 
+  // 2️⃣ Обработка оплаты АРЕНДЫ / НАЛОГА (по кнопке "Оплатить" или "Продолжить")
+  if (room.state.actionPending === 'INFO') {
+    const payment = room.state.pendingPayment
+    if (payment && payment.amount > 0) {
+      // 🔑 Если денег хватает → списываем
+      if (player.money >= payment.amount) {
+        player.money -= payment.amount
+        if (payment.creditorId) {
+          const creditor = room.getPlayer(payment.creditorId)
+          if (creditor) creditor.money += payment.amount
+        }
+        room.addLog(`✅ ${player.name} оплатил ${payment.amount}₽ ${payment.type === 'tax' ? 'налога' : 'аренды'}`)
+      } else {
+        // 🔑 Если денег не хватает → оставляем долг (не списываем, не блокируем ход)
+        room.addLog(`⚠️ У ${player.name} недостаточно средств для оплаты ${payment.amount}₽. Долг сохранён.`)
+        // Опционально: можно добавить поле player.debt += payment.amount для будущего учёта
+      }
+    }
+
+    room.state.pendingPayment = null
+    room.state.actionPending = 'NONE'
+
+    const keepTurn = room.state.lastRollWasDouble && player.consecutiveDoubles < 3
+    if (keepTurn) {
+      room.state.actionPending = 'DOUBLE_TURN'
+    } else {
+      room.finishTurn()
+    }
+
+    broadcast(roomViews, room.id, { type: 'SYNC_STATE', payload: buildSyncPayload(room.state) })
+    return { success: true }
+  }
+
   // 2️⃣ Закрытие модалок ПОКУПКИ / ИНФО / ДУБЛЯ
   if (['BUY', 'INFO', 'DOUBLE_TURN'].includes(room.state.actionPending)) {
     room.state.actionPending = 'NONE'

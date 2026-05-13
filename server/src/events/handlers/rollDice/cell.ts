@@ -46,77 +46,36 @@ export function processCellEffects(
 }
 
 function handlePropertyCell(
-  room: Room,
-  playerId: string,
-  space: any,
-  dice: [number, number],
-  roomViews: Map<string, RoomView>
+  room: Room, playerId: string, space: any, dice: [number, number], roomViews: Map<string, RoomView>
 ): boolean {
-  const player = room.getPlayer(playerId)!
   const owner = room.state.players.find(p => p.properties?.includes(space.id))
-
-  // 🆕 Свободная ячейка → предложение купить
   if (!owner) {
     room.state.actionPending = 'BUY'
-    broadcast(roomViews, room.id, {
-      type: 'OFFER_BUY',
-      playerId,
-      spaceId: space.id,
-      price: space.price,
-      name: space.name
-    })
+    broadcast(roomViews, room.id, { type: 'OFFER_BUY', playerId, spaceId: space.id, price: space.price, name: space.name })
     return true
   }
 
-  // 👤 Чужая собственность → оплата аренды
   if (owner.id !== playerId) {
     const rent = calculateRent(space.id, owner.id, room.state.players, dice)
-    if (rent > 0) {
-      const paid = Math.min(player.money, rent)
-      owner.money += paid
-      player.money -= paid
-
-      const label = getHouseLabel(owner, space.id)
-      room.addLog(`💸 ${player.name} заплатил ${paid}₽ аренды ${space.name} ${label}`)
-
-      room.state.actionPending = 'INFO'
-      broadcast(roomViews, room.id, {
-        type: 'ACTION_REQUIRED',
-        title: '💸 Аренда',
-        message: `Оплачено ${paid}₽ ${label}`,
-        icon: '💸',
-        spaceId: space.id,
-        amount: paid
-      })
-      return true
-    }
+    // 🔑 Не списываем сразу! Сохраняем ожидаемый платёж
+    room.state.pendingPayment = { amount: rent, creditorId: owner.id, type: 'rent' }
+    room.state.actionPending = 'INFO'
+    room.addLog(`💸 ${room.getPlayer(playerId)?.name} должен заплатить ${rent}₽ аренды за ${space.name}`)
+    broadcast(roomViews, room.id, { type: 'ACTION_REQUIRED', title: '💸 Аренда', message: `Аренда ${rent}₽`, icon: '💸', spaceId: space.id, amount: rent })
+    return true
   }
-
   return false
 }
 
 function handleTaxCell(
-  room: Room,
-  playerId: string,
-  space: any,
-  roomViews: Map<string, RoomView>
+  room: Room, playerId: string, space: any, roomViews: Map<string, RoomView>
 ): boolean {
-  const player = room.getPlayer(playerId)!
   const tax = space.id === 4 ? 200 : 100
-
-  player.money -= tax
-  room.addLog(`📉 ${player.name} заплатил налог ${tax}₽`)
-
+  // 🔑 Не списываем сразу! Сохраняем ожидаемый платёж
+  room.state.pendingPayment = { amount: tax, creditorId: null, type: 'tax' }
   room.state.actionPending = 'INFO'
-  broadcast(roomViews, room.id, {
-    type: 'ACTION_REQUIRED',
-    title: '📉 Налог',
-    message: `Налог ${tax}₽ списан`,
-    icon: '📉',
-    spaceId: space.id,
-    amount: tax
-  })
-
+  room.addLog(`📉 ${room.getPlayer(playerId)?.name} должен заплатить налог ${tax}₽`)
+  broadcast(roomViews, room.id, { type: 'ACTION_REQUIRED', title: '📉 Налог', message: `Налог ${tax}₽`, icon: '📉', spaceId: space.id, amount: tax })
   return true
 }
 
