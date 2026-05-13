@@ -45,6 +45,37 @@ const hoveredGroupColor = ref<string | null>(null)
 const selectedSpace = ref<ISpaceData | null>(null)
 const showModal = ref(false)
 
+const pendingActionSpace = computed(() => {
+  if (!store.pendingAction || store.pendingAction === 'DOUBLE_TURN') return null
+  const id = store.selectedSpaceId ?? currentPlayer.value?.pos
+  return id !== undefined ? getSpaceById(id) : null
+})
+
+// 🔑 Умный обработчик главной кнопки
+const handleMainAction = () => {
+  if (pendingActionSpace.value) {
+    // Принудительно ставим ячейку с активным действием
+    selectedSpace.value = pendingActionSpace.value
+    showModal.value = true
+  } else {
+    rollDice()
+  }
+}
+
+// 🔑 Текст кнопки в зависимости от контекста
+const mainButtonText = computed(() => {
+  if (pendingActionSpace.value) {
+    const action = store.pendingAction
+    if (action === 'BUY') return '📋 Купить или отказаться'
+    if (action === 'INFO') return `📋 ${store.pendingInfo?.title || 'Продолжить'}`
+    if (action === 'CARD') return '📋 Прочитайте карту'
+    return '📋 Подтвердите действие'
+  }
+  if (currentPlayer.value?.isInJail && !store.pendingAction) return '🔒 Вы в тюрьме'
+  if (isMyTurn.value) return '🎲 Бросить кубики'
+  return `⏳ Ждите хода: ${getPlayerName(store.currentTurn)}`
+})
+
 // При смене хода закрываем модалку и чистим локальный UI-стейт
 watch(() => store.currentTurn, (newTurn, oldTurn) => {
   if (oldTurn && oldTurn !== newTurn) {
@@ -382,16 +413,11 @@ watch(() => store.logs.length, async () => {
             <div class="flex flex-col items-center gap-2 md:gap-3 w-full max-w-xs">
               <!-- 🔑 Динамическая кнопка: Бросить / Продолжить действие -->
               <button
-                  @click="store.pendingAction && store.pendingAction !== 'DOUBLE_TURN' ? (showModal = true) : rollDice()"
-                  :disabled="store.status !== 'PLAYING' || !isMyTurn || !isWsReady() || (isInJail && !store.pendingAction)"
+                  @click="handleMainAction"
+                  :disabled="store.status !== 'PLAYING' || !isWsReady() || (currentPlayer?.isInJail && !store.pendingAction)"
                   class="w-full px-4 md:px-5 py-2.5 md:py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-semibold rounded-xl transition active:scale-95 shadow-lg text-base md:text-lg flex items-center justify-center gap-2"
               >
-                <span v-if="store.pendingAction && store.pendingAction !== 'DOUBLE_TURN'">
-                  📋 {{ getPendingText() }}
-                </span>
-                <span v-else-if="isInJail && !store.pendingAction">🔒 Вы в тюрьме</span>
-                <span v-else-if="isMyTurn">🎲 Бросить кубики</span>
-                <span v-else>⏳ Ждите хода: {{ getPlayerName(store.currentTurn) }}</span>
+                {{ mainButtonText }}
               </button>
 
               <div v-if="isInJail && isMyTurn && !store.pendingAction" class="flex flex-col gap-1.5 w-full">
