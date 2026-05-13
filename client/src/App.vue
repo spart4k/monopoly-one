@@ -8,15 +8,19 @@ import Lobby from './components/Lobby.vue'
 import MonopolyBoard from './components/MonopolyBoard.vue'
 
 const store = useGameStore()
-const { myId, roomId, setSession, clearSession } = useSession()
+const { myId, roomId, playerName, setSession, clearSession, ensureSession } = useSession()
 let wsInstance: any = null
 
 // 🔑 Флаг: пытаемся ли мы восстановиться после перезагрузки
 const isReconnecting = ref(false)
 
 onMounted(() => {
+  // 🔑 КРИТИЧНО: гарантируем, что myId установлен ДО отправки любых событий
+  // Имя передавать не нужно — оно управляется в Lobby.vue
+  ensureSession()
+
   const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:3000/ws'
-  console.log('🔌 [APP] Connecting to', wsUrl)
+  console.log('🔌 [APP] Connecting to', wsUrl, 'myId:', myId.value, 'name:', playerName.value)
 
   wsInstance = initWs(
       wsUrl,
@@ -24,10 +28,10 @@ onMounted(() => {
         console.log('📥 [APP] Received:', data.type, data)
         store.applyEvent(data)
 
-        // 🔑 КРИТИЧНО: при получении MY_ID → сохраняем сессию
+        // 🔑 При получении MY_ID → обновляем сессию
         if (data.type === 'MY_ID' && data.playerId && data.roomId) {
           console.log('✅ [APP] Setting session from MY_ID:', data.playerId)
-          setSession(data.playerId, data.roomId)
+          setSession(data.playerId, data.roomId, data.name || playerName.value || undefined)
         }
 
         // 🔑 При ошибке "игрок не найден" → чистим сессию
@@ -49,36 +53,9 @@ onUnmounted(() => {
 // 🔑 Watch для блокировки интерфейса при потере связи
 watch(isConnected, (connected) => {
   if (!connected && store.status === 'PLAYING') {
-    console.warn('⚠️ [APP] Connection lost')
-  }
-})
-
-// 🐛 Отладка
-watch(() => store.status, (newVal, oldVal) => {
-  console.log(`🔄 [APP] Status: ${oldVal} -> ${newVal}`)
-  if (newVal === 'LOBBY' && oldVal === 'PLAYING') {
-    clearSession()
-  }
-}, { immediate: true })
-
-const leaveGame = () => {
-  clearSession()
-  store.status = 'LOBBY'
-  sendEvent({ type: 'GET_LOBBY' })
-}
-
-onUnmounted(() => {
-  console.log('🔌 [APP] Cleaning up WS')
-  wsInstance?.close()
-})
-
-// 🔑 Watch для блокировки интерфейса при потере связи
-watch(isConnected, (connected) => {
-  if (!connected && store.status === 'PLAYING') {
     console.warn('⚠️ [APP] Connection lost, showing reconnecting state')
     isReconnecting.value = true
   } else if (connected && isReconnecting.value && store.status !== 'PLAYING') {
-    // Соединение восстановлено, но игра не активна → возможно, нужно обновить лобби
     console.log('🔄 [APP] Connection restored, requesting lobby update')
     sendEvent({ type: 'GET_LOBBY' })
   }
@@ -87,19 +64,24 @@ watch(isConnected, (connected) => {
 // 🐛 Отслеживаем изменение статуса для отладки
 watch(() => store.status, (newVal, oldVal) => {
   console.log(`🔄 [APP] Status changed: ${oldVal} -> ${newVal}`)
-  // Если перешли в лобби → очищаем сессию (игрок явно вышел)
   if (newVal === 'LOBBY' && oldVal === 'PLAYING') {
     clearSession()
     isReconnecting.value = false
   }
 }, { immediate: true })
 
+const leaveGame = () => {
+  clearSession()
+  isReconnecting.value = false
+  store.status = 'LOBBY'
+  sendEvent({ type: 'GET_LOBBY' })
+}
 </script>
 
 <template>
   <div class="min-h-screen bg-gray-900 text-white relative">
 
-    <!-- 🔴 Оверлей переподключения (показывается при потере связи в игре) -->
+    <!-- 🔴 Оверлей переподключения -->
     <div
         v-if="isReconnecting && store.status === 'PLAYING'"
         class="fixed inset-0 z-[100] bg-gray-900/95 backdrop-blur-sm flex flex-col items-center justify-center gap-4"
@@ -114,7 +96,7 @@ watch(() => store.status, (newVal, oldVal) => {
       </button>
     </div>
 
-    <!-- 🐛 Отладочная панель (всегда поверх, но под оверлеем) -->
+    <!-- 🐛 Отладочная панель -->
     <div class="fixed top-4 left-4 bg-gray-800/90 backdrop-blur text-white px-3 py-2 rounded-lg text-xs z-50 border border-gray-600 shadow-xl font-mono">
       🟢 WS: {{ isConnected ? 'connected' : 'disconnected' }}<br>
       🎮 Status: <span class="font-bold text-yellow-300">{{ store.status || 'undefined' }}</span><br>

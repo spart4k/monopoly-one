@@ -23,25 +23,22 @@ watch(username, (v) => {
 })
 
 onMounted(() => {
-  // 🔑 Инициализируем myId, если он ещё не установлен
-  if (!myId.value) {
-    const stored = localStorage.getItem('monopoly_player_id')
-    if (stored) {
-      myId.value = stored
-    } else {
-      const newId = `p_${Math.random().toString(36).slice(2, 8)}`
-      myId.value = newId
-      localStorage.setItem('monopoly_player_id', newId)
-    }
+  const { myId: sessionMyId, ensureSession } = useSession()
+
+  // 🔑 Гарантируем сессию с именем из инпута
+  ensureSession(username.value)
+
+  // Синхронизируем локальный ref с сессией (если нужно)
+  if (!myId.value && sessionMyId.value) {
+    myId.value = sessionMyId.value
   }
 
-  // 🔑 Авто-возврат в комнату ТОЛЬКО если есть валидная сессия
-  const savedRoom = sessionStorage.getItem('monopoly_roomId')
-  const savedName = sessionStorage.getItem('monopoly_playerName') || username.value.trim()
+  // 🔑 Авто-возврат в комнату (только если сессия валидна)
+  const savedRoom = roomId.value
+  const savedName = playerName.value || username.value.trim()
 
   if (savedRoom && myId.value && savedName) {
     console.log('🔄 [LOBBY] Auto-rejoining:', myId.value, 'in room', savedRoom)
-    // 🔑 Важно: передаём roomId явно, чтобы он имел приоритет в sendEvent
     sendEvent({
       type: 'JOIN_ROOM',
       roomId: savedRoom,
@@ -133,6 +130,11 @@ const fillSlots = (players: any[], max: number) => {
   while (slots.length < max) slots.push(null)
   return slots
 }
+
+watch(() => store.availableRooms, (rooms) => {
+  console.log(`🔄 [LOBBY] availableRooms updated: ${rooms?.length || 0} rooms`, rooms)
+}, { immediate: true, deep: true })
+
 </script>
 
 <template>

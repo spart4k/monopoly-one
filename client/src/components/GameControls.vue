@@ -8,13 +8,13 @@ import { sendEvent, isWsReady } from '../lib/ws'
 
 const store = useGameStore()
 const { myId } = useSession()
+const emit = defineEmits<{ openDetails: [] }>()
 
-const emit = defineEmits<{
-  openDetails: []
-}>()
+// 🔑 Безопасный ID: если myId.value пуст, берём из sessionStorage
+const currentPlayerId = computed(() => myId.value || sessionStorage.getItem('monopoly_playerId') || '')
 
 const currentPlayer = computed(() => store.players.find(p => p.id === store.currentTurn))
-const isMyTurn = computed(() => !!myId.value && store.currentTurn === myId.value)
+const isMyTurn = computed(() => !!currentPlayerId.value && store.currentTurn === currentPlayerId.value)
 const isInJail = computed(() => currentPlayer.value?.isInJail || false)
 
 const pendingActionSpace = computed(() => {
@@ -23,7 +23,6 @@ const pendingActionSpace = computed(() => {
   return id !== undefined ? getSpaceById(id) : null
 })
 
-// 🔑 Показывать панель: есть действие + мой ход
 const showActionPanel = computed(() => {
   const action = store.pendingAction
   if (!action || action === 'NONE' || action === 'DOUBLE_TURN') return false
@@ -32,36 +31,39 @@ const showActionPanel = computed(() => {
   return true
 })
 
-// 🔑 Сумма к оплате (из pendingInfo или цены)
 const paymentAmount = computed(() => {
   if (store.pendingAction === 'BUY') return pendingActionSpace.value?.price || 0
   if (store.pendingAction === 'INFO') return store.pendingInfo?.amount || 0
   return 0
 })
 
-// 🔑 Хватает ли денег
 const canAfford = computed(() => {
   const me = store.players.find(p => p.id === myId.value)
   return (me?.money || 0) >= paymentAmount.value
 })
 
-// 🔑 Сколько не хватает (если не хватает)
 const debtAmount = computed(() => {
   const me = store.players.find(p => p.id === myId.value)
   const diff = paymentAmount.value - (me?.money || 0)
   return diff > 0 ? diff : 0
 })
 
-// 🔑 Текст основной кнопки
+// 🔑 Флаг: обязательно ли действие (налог/аренда = нельзя пропустить)
+const isMandatory = computed(() => store.pendingInfo?.isMandatory === true)
+
 const actionPanelPrimaryText = computed(() => {
   const action = store.pendingAction
   if (action === 'BUY') return `Купить за ${paymentAmount.value}₽`
-  if (action === 'INFO') return `Оплатить ${paymentAmount.value}₽`
+  if (action === 'INFO') {
+    if (store.pendingInfo?.title?.includes('Бонус') || store.pendingInfo?.icon === '🎁') {
+      return `Принять ${paymentAmount.value}₽`
+    }
+    return `Оплатить ${paymentAmount.value}₽`
+  }
   if (action === 'CARD') return 'Прочитайте карту'
   return 'Продолжить'
 })
 
-// 🔑 Главная кнопка: текст и логика
 const mainButtonText = computed(() => {
   if (isMyTurn.value) {
     if (isInJail.value) return '🔒 Вы в тюрьме'
@@ -70,42 +72,33 @@ const mainButtonText = computed(() => {
   return `⏳ Ждите хода: ${currentPlayer.value?.name || '...'}`
 })
 
-// 🔹 Действия
 const rollDice = () => {
-  if (!myId.value || !isMyTurn.value) return
-  sendEvent({ type: 'ROLL_DICE', playerId: myId.value })
+  if (!currentPlayerId.value || !isMyTurn.value) return
+  sendEvent({ type: 'ROLL_DICE', playerId: currentPlayerId.value })
 }
 
 const handleMainAction = () => {
   if (pendingActionSpace.value && showActionPanel.value) {
     const action = store.pendingAction
     if (action === 'BUY') {
-      sendEvent({ type: 'BUY_PROPERTY', playerId: myId.value, spaceId: pendingActionSpace.value!.id })
-    } else if (action === 'INFO') {
-      // 🔑 Для налогов/аренды: если денег хватает → оплачиваем, если нет → просто продолжаем (долг остаётся)
-      if (canAfford.value) {
-        sendEvent({ type: 'PASS_ACTION', playerId: myId.value }) // сервер спишет деньги
-      } else {
-        sendEvent({ type: 'PASS_ACTION', playerId: myId.value }) // сервер оставит долг
-      }
-    } else if (action === 'CARD') {
-      sendEvent({ type: 'PASS_ACTION', playerId: myId.value })
+      sendEvent({ type: 'BUY_PROPERTY', playerId: currentPlayerId.value, spaceId: pendingActionSpace.value!.id })
+    } else if (action === 'INFO' || action === 'CARD') {
+      sendEvent({ type: 'PASS_ACTION', playerId: currentPlayerId.value })
     }
   } else {
     rollDice()
   }
 }
 
-const handlePassAction = () => sendEvent({ type: 'PASS_ACTION', playerId: myId.value })
-const handlePayJailFine = () => sendEvent({ type: 'PAY_JAIL_FINE', playerId: myId.value })
-const handleUseJailCard = () => sendEvent({ type: 'USE_JAIL_CARD', playerId: myId.value })
-const handleJailRoll = () => sendEvent({ type: 'ROLL_DICE', playerId: myId.value })
+const handlePassAction = () => sendEvent({ type: 'PASS_ACTION', playerId: currentPlayerId.value })
+const handlePayJailFine = () => sendEvent({ type: 'PAY_JAIL_FINE', playerId: currentPlayerId.value })
+const handleUseJailCard = () => sendEvent({ type: 'USE_JAIL_CARD', playerId: currentPlayerId.value })
+const handleJailRoll = () => sendEvent({ type: 'ROLL_DICE', playerId: currentPlayerId.value })
 </script>
 
 <template>
   <div class="flex flex-col items-center gap-2 md:gap-3 w-full max-w-xs">
 
-    <!-- 🔹 1️⃣ Главная кнопка (скрывается при панели действий или тюрьме) -->
     <button
         v-if="!showActionPanel && !isInJail"
         @click="handleMainAction"
@@ -115,7 +108,6 @@ const handleJailRoll = () => sendEvent({ type: 'ROLL_DICE', playerId: myId.value
       {{ mainButtonText }}
     </button>
 
-    <!-- 🔹 2️⃣ Панель действий (покупка/аренда/налог/карта) -->
     <div v-if="showActionPanel" class="w-full bg-white/90 backdrop-blur rounded-xl p-3 shadow-lg border border-gray-200 space-y-3">
 
       <!-- 🎨 Мини-шапка -->
@@ -132,7 +124,8 @@ const handleJailRoll = () => sendEvent({ type: 'ROLL_DICE', playerId: myId.value
           <p class="text-sm text-gray-600 mt-0.5">
             <template v-if="store.pendingAction === 'BUY'">💰 Цена: <span class="font-semibold text-green-600">{{ paymentAmount }}₽</span></template>
             <template v-else-if="store.pendingAction === 'INFO'">
-              <span class="font-semibold" :class="canAfford ? 'text-red-600' : 'text-orange-600'">
+              <span v-if="store.pendingInfo?.icon === '🎁'" class="font-semibold text-green-600">🎁 Бонус: {{ paymentAmount }}₽</span>
+              <span v-else class="font-semibold" :class="canAfford ? 'text-red-600' : 'text-orange-600'">
                 {{ store.pendingInfo?.title?.includes('Аренда') ? '💸 Аренда:' : '📉 Налог:' }} {{ paymentAmount }}₽
               </span>
             </template>
@@ -144,7 +137,6 @@ const handleJailRoll = () => sendEvent({ type: 'ROLL_DICE', playerId: myId.value
       <!-- 🔑 Кнопки действий -->
       <div class="space-y-2">
 
-        <!-- 🃏 Карты: только "Далее" + "Детали" -->
         <template v-if="store.pendingAction === 'CARD'">
           <div class="flex gap-2">
             <button @click="handleMainAction" class="flex-1 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition">▶️ Далее</button>
@@ -152,9 +144,8 @@ const handleJailRoll = () => sendEvent({ type: 'ROLL_DICE', playerId: myId.value
           </div>
         </template>
 
-        <!-- 🏠💸📉 Покупка / Аренда / Налог -->
         <template v-else>
-          <!-- Основная кнопка: Купить / Оплатить -->
+          <!-- Основная кнопка -->
           <button
               @click="handleMainAction"
               :disabled="store.pendingAction === 'BUY' && !canAfford"
@@ -168,8 +159,8 @@ const handleJailRoll = () => sendEvent({ type: 'ROLL_DICE', playerId: myId.value
             {{ actionPanelPrimaryText }}
           </button>
 
-          <!-- Вторичные кнопки -->
-          <div class="flex gap-2">
+          <!-- Вторичные кнопки: НЕТ "Пропустить" для налогов/аренды -->
+          <div class="flex gap-2" v-if="!isMandatory || store.pendingAction === 'BUY'">
             <button
                 @click="handlePassAction"
                 class="flex-1 px-3 py-2 bg-red-500 hover:bg-red-600 text-white font-medium rounded-lg transition text-sm"
@@ -184,13 +175,12 @@ const handleJailRoll = () => sendEvent({ type: 'ROLL_DICE', playerId: myId.value
             </button>
           </div>
 
-          <!-- 🔴 Индикатор нехватки средств (только для аренды/налога) -->
-          <div v-if="store.pendingAction === 'INFO' && !canAfford" class="text-xs text-red-600 text-center font-medium bg-red-50 px-2 py-1.5 rounded border border-red-200">
-            🔴 Не хватает {{ debtAmount }}₽ для оплаты
-            <span class="block text-[10px] text-gray-500 mt-0.5">Можно пропустить — долг сохранится</span>
+          <!-- Индикатор нехватки (только для обязательных платежей) -->
+          <div v-if="store.pendingAction === 'INFO' && !canAfford && isMandatory" class="text-xs text-red-600 text-center font-medium bg-red-50 px-2 py-1.5 rounded border border-red-200">
+            🔴 Не хватает {{ debtAmount }}₽
+            <span class="block text-[10px] text-gray-500 mt-0.5">Ход продолжится, долг сохранится</span>
           </div>
 
-          <!-- Подсказка для покупки -->
           <p v-if="store.pendingAction === 'BUY' && !canAfford" class="text-xs text-red-600 text-center font-medium bg-red-50 px-2 py-1 rounded">
             🔴 Не хватает {{ debtAmount }}₽
           </p>
@@ -198,7 +188,7 @@ const handleJailRoll = () => sendEvent({ type: 'ROLL_DICE', playerId: myId.value
       </div>
     </div>
 
-    <!-- 🔹 3️⃣ Панель тюрьмы -->
+    <!-- 🔹 Панель тюрьмы -->
     <div v-if="isMyTurn && isInJail && !showActionPanel" class="w-full space-y-2">
       <div class="text-center text-sm font-medium text-gray-700 bg-yellow-50/80 border border-yellow-200 rounded-lg p-2">🔒 Вы находитесь в тюрьме</div>
       <button @click="handlePayJailFine" :disabled="(store.players.find(p => p.id === myId)?.money || 0) < 50" class="w-full px-3 py-2.5 bg-yellow-500 hover:bg-yellow-600 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition text-sm">💸 Заплатить 50₽</button>

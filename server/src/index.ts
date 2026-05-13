@@ -31,9 +31,10 @@ fastify.register(fastifyCors, { origin: '*' })
 fastify.register(fastifyWs)
 
 // 🔹 Рассылка списка комнат ТОЛЬКО игрокам в лобби
+// 🔹 Рассылка списка комнат
 function broadcastLobbyUpdate(targetSocket?: any) {
   const rooms = Array.from(roomManager.activeRooms.values())
-    .filter(r => r.state.status === 'LOBBY')
+    .filter(r => r.state.status === 'LOBBY') // Только лобби
     .map(r => ({
       id: r.id,
       status: r.state.status,
@@ -48,18 +49,36 @@ function broadcastLobbyUpdate(targetSocket?: any) {
 
   const msg = JSON.stringify({ type: 'ROOMS_LIST', rooms })
 
-  for (const sock of allSockets) {
-    if (sock.readyState === 1) {
-      if (targetSocket) {
-        if (sock === targetSocket) sock.send(msg)
+  // 🔑 Если указан targetSocket → шлём ТОЛЬКО ему (для GET_LOBBY)
+  if (targetSocket) {
+    try {
+      if (targetSocket.readyState === 1) { // WebSocket.OPEN
+        targetSocket.send(msg)
+        console.log(`📤 [LOBBY] Sent ROOMS_LIST to socket (${rooms.length} rooms)`)
       } else {
+        console.warn(`⚠️ [LOBBY] Socket not ready: ${targetSocket.readyState}`)
+      }
+    } catch (e) {
+      console.error(`💥 [LOBBY] Send error:`, e)
+    }
+    return
+  }
+
+  // 🔑 Иначе шлём всем, кто НЕ в активной игре
+  for (const sock of allSockets) {
+    try {
+      if (sock.readyState === 1) {
         const sockPlayerId = (sock as any).playerId
         const isInGame = sockPlayerId &&
           Array.from(roomManager.activeRooms.values()).some(r =>
             r.state.status === 'PLAYING' && r.getPlayer(sockPlayerId)
           )
-        if (!isInGame) sock.send(msg)
+        if (!isInGame) {
+          sock.send(msg)
+        }
       }
+    } catch (e) {
+      console.error(`💥 [LOBBY] Broadcast error:`, e)
     }
   }
 }
@@ -99,12 +118,19 @@ async function handleEvent(msg: string, socket: any) {
     const event = JSON.parse(msg)
     const { type, playerId, name, roomId: eventRoomId, spaceId } = event
 
+    // 🔑 Блокируем строку "null" как playerId
+    if (playerId && playerId === 'null') {
+      console.warn(`⚠️ [EV] Blocked: playerId is string "null"`, event)
+      return socket.send(JSON.stringify({ type: 'ERROR', message: 'Invalid session. Please refresh.' }))
+    }
+
     console.log(`\n📥 [EV] INCOMING: ${type} | Player: ${playerId} | Room: ${eventRoomId}`)
 
     let room: ReturnType<RoomManager['getRoom']> | null = null
 
     // 🔹 GET_LOBBY — без привязки к комнате
     if (type === 'GET_LOBBY') {
+      console.log(`📤 [EV] Sending ROOMS_LIST to ${playerId || 'anonymous'}`)
       broadcastLobbyUpdate(socket)
       return
     }

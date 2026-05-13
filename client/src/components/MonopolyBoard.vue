@@ -124,15 +124,15 @@ const rollDice = () => {
 const handleBuyProperty = () => {
   if (!selectedSpace.value || !myId.value) return
   sendEvent({ type: 'BUY_PROPERTY', playerId: myId.value, spaceId: selectedSpace.value.id })
+  // 🔑 УБРАНО: store.clearPendingAction() → сервер сам установит NONE/DOUBLE_TURN
   showModal.value = false
-  store.clearPendingAction()
 }
 
 const handlePassAction = () => {
   if (!myId.value) return
   sendEvent({ type: 'PASS_ACTION', playerId: myId.value })
+  // 🔑 УБРАНО: store.clearPendingAction()
   showModal.value = false
-  store.clearPendingAction()
 }
 
 const handleBuyHouse = (spaceId: number) => {
@@ -343,7 +343,7 @@ const getPlayerName = (id: string) => store.players.find(p => p.id === id)?.name
             <p class="text-gray-500 text-sm md:text-base">Ход: <span class="font-semibold text-gray-800">{{ getPlayerName(store.currentTurn) }}</span></p>
 
             <!-- 🧪 Дебаг-селект (скрыт по умолчанию) -->
-            <div v-if="false" class="w-full max-w-xs mt-1">
+            <div v-if="true" class="w-full max-w-xs mt-1">
               <label class="text-[9px] md:text-[10px] font-semibold text-gray-400 mb-0.5 block text-center">🧪 Все ячейки (0-39):</label>
               <select v-model="debugTarget" class="w-full bg-gray-100 border border-gray-300 rounded-lg px-2 py-1 text-[10px] md:text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 max-h-48 overflow-y-auto">
                 <option :value="null">🎲 Случайный бросок</option>

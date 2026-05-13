@@ -48,8 +48,16 @@ export function handleDrawCard(room: Room, playerId: string, type: string, roomV
   }
   if (card.jailCard) player.jailCards += card.jailCard
   if (card.goToJail) {
-    player.pos = 10; player.isInJail = true; player.jailTurns = 0
-    room.addLog(`🚔 ${player.name} отправлен в тюрьму!`)
+    player.pos = 10
+    player.isInJail = true
+    player.jailTurns = 0
+    player.consecutiveDoubles = 0
+    room.addLog(`🚔 ${player.name} отправлен в тюрьму по карте!`)
+
+// 🔑 КРИТИЧНО: сначала обновляем состояние, потом рассылаем
+    broadcast(roomViews, room.id, { type: 'GO_TO_JAIL', playerId, reason: 'card' })
+// Не вызываем finishTurn() здесь — ход завершится после обработки действия
+    return { success: true, actionRequired: false }
   }
 
   room.addLog(`🃏 ${player.name}: "${card.text}"`)

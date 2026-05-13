@@ -3,13 +3,9 @@ import type { Room } from '../../../rooms/Room'
 import type { RoomView } from '../../../rooms/RoomManager'
 import { broadcast, buildSyncPayload } from '../../../lib/ws-utils'
 import { getSpaceById } from '../../../shared/boardConfig'
-import { handleDrawCard } from '../cardAction'
 import { calculateRent, getHouseLabel } from '../../../lib/rentCalculator'
+import { handleDrawCard } from '../cardAction'
 
-/**
- * Обрабатывает эффекты при попадании на ячейку
- * @returns true если требуется действие игрока (покупка/аренда/карта)
- */
 export function processCellEffects(
   room: Room,
   playerId: string,
@@ -19,7 +15,6 @@ export function processCellEffects(
 ): boolean {
   const player = room.getPlayer(playerId)
   const space = getSpaceById(spaceId)
-
   if (!player || !space) return false
 
   // 🏠 Недвижимость и ЖД вокзалы
@@ -49,53 +44,75 @@ function handlePropertyCell(
   room: Room, playerId: string, space: any, dice: [number, number], roomViews: Map<string, RoomView>
 ): boolean {
   const owner = room.state.players.find(p => p.properties?.includes(space.id))
+
+  // 🆕 Свободная ячейка → предложение купить
   if (!owner) {
     room.state.actionPending = 'BUY'
     broadcast(roomViews, room.id, { type: 'OFFER_BUY', playerId, spaceId: space.id, price: space.price, name: space.name })
     return true
   }
 
+  // 👤 Чужая собственность → ТОЛЬКО сохраняем ожидание оплаты
   if (owner.id !== playerId) {
     const rent = calculateRent(space.id, owner.id, room.state.players, dice)
-    // 🔑 Не списываем сразу! Сохраняем ожидаемый платёж
+    const label = getHouseLabel(owner, space.id)
+
+    // 🔑 КРИТИЧНО: НЕ ТРОГАЕМ ДЕНЬГИ! Только состояние
     room.state.pendingPayment = { amount: rent, creditorId: owner.id, type: 'rent' }
     room.state.actionPending = 'INFO'
-    room.addLog(`💸 ${room.getPlayer(playerId)?.name} должен заплатить ${rent}₽ аренды за ${space.name}`)
-    broadcast(roomViews, room.id, { type: 'ACTION_REQUIRED', title: '💸 Аренда', message: `Аренда ${rent}₽`, icon: '💸', spaceId: space.id, amount: rent })
+
+    room.addLog(`💸 ${room.getPlayer(playerId)?.name} должен заплатить ${rent}₽ аренды за ${space.name} ${label}`)
+    broadcast(roomViews, room.id, {
+      type: 'ACTION_REQUIRED',
+      title: '💸 Аренда',
+      message: `Аренда ${rent}₽ ${label}`,
+      icon: '💸',
+      spaceId: space.id,
+      amount: rent,
+      isMandatory: true
+    })
     return true
   }
+
   return false
 }
 
+// server/src/events/handlers/rollDice/cell.ts
 function handleTaxCell(
   room: Room, playerId: string, space: any, roomViews: Map<string, RoomView>
 ): boolean {
   const tax = space.id === 4 ? 200 : 100
-  // 🔑 Не списываем сразу! Сохраняем ожидаемый платёж
+
+  // 🔑 КРИТИЧНО: сначала устанавливаем состояние
   room.state.pendingPayment = { amount: tax, creditorId: null, type: 'tax' }
   room.state.actionPending = 'INFO'
+
   room.addLog(`📉 ${room.getPlayer(playerId)?.name} должен заплатить налог ${tax}₽`)
-  broadcast(roomViews, room.id, { type: 'ACTION_REQUIRED', title: '📉 Налог', message: `Налог ${tax}₽`, icon: '📉', spaceId: space.id, amount: tax })
+
+  // 🔑 Потом рассылаем — клиент получит и actionPending, и pendingPayment
+  broadcast(roomViews, room.id, {
+    type: 'ACTION_REQUIRED',
+    title: '📉 Налог',
+    message: `Налог ${tax}₽`,
+    icon: '📉',
+    spaceId: space.id,
+    amount: tax,
+    isMandatory: true
+  })
   return true
 }
 
 function handleCardCell(
-  room: Room,
-  playerId: string,
-  cardType: string,
-  roomViews: Map<string, RoomView>
+  room: Room, playerId: string, cardType: string, roomViews: Map<string, RoomView>
 ): boolean {
   const result = handleDrawCard(room, playerId, cardType, roomViews)
   return result?.actionRequired || false
 }
 
 function handleGoToJailCell(
-  room: Room,
-  playerId: string,
-  roomViews: Map<string, RoomView>
+  room: Room, playerId: string, roomViews: Map<string, RoomView>
 ): boolean {
   const player = room.getPlayer(playerId)!
-
   player.pos = 10
   player.isInJail = true
   player.jailTurns = 0
@@ -104,23 +121,13 @@ function handleGoToJailCell(
   room.addLog(`🚔 ${player.name} отправлен в тюрьму!`)
   broadcast(roomViews, room.id, { type: 'GO_TO_JAIL', playerId })
   room.finishTurn()
-
   return true
 }
 
-/**
- * Завершает ход: передаёт следующему игроку или сохраняет при дубле
- */
 export function finalizeTurn(
-  room: Room,
-  playerId: string,
-  keepTurn: boolean,
-  actionRequired: boolean,
-  roomViews: Map<string, RoomView>
+  room: Room, playerId: string, keepTurn: boolean, actionRequired: boolean, roomViews: Map<string, RoomView>
 ): void {
-  // Если висит действие — ждём ответа игрока
   if (actionRequired) return
-
   if (keepTurn) {
     room.state.actionPending = 'DOUBLE_TURN'
     room.addLog(`🎲 ${room.getPlayer(playerId)?.name} сохраняет ход (дубль)`)
