@@ -78,6 +78,7 @@ export const useGameStore = defineStore('game', () => {
         // 🔄 Полная синхронизация состояния
         case 'SYNC_STATE':
           if (!event.payload) return
+          console.log(event.payload)
 
           status.value = event.payload.status || 'LOBBY'
           currentTurn.value = event.payload.currentTurn || ''
@@ -106,10 +107,10 @@ export const useGameStore = defineStore('game', () => {
           break
 
         // 🃏 Вытянута карта
-        case 'CARD_DRAWN':
-          pendingCard.value = event.card || { text: 'Карта вытянута', action: 'move' }
-          pendingAction.value = 'CARD' // 🔑 Устанавливаем локально
-          break
+        // case 'CARD_DRAWN':
+        //   pendingCard.value = event.card || { text: 'Карта вытянута', action: 'move' }
+        //   pendingAction.value = 'CARD' // 🔑 Устанавливаем локально
+        //   break
 
         // 🆔 Сервер присвоил нам ID
         case 'MY_ID':

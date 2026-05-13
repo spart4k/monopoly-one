@@ -56,17 +56,13 @@ export function handleBuyProperty(
 }
 
 export function handlePassAction(room: Room, playerId: string, roomViews: Map<string, RoomView>) {
-  // 🔑 Валидация: отклоняем "null"
-  if (!playerId || playerId === 'null') {
-    return { error: 'Invalid player ID' }
-  }
-
+  if (!playerId || playerId === 'null') return { error: 'Invalid player ID' }
   const player = room.getPlayer(playerId)
   if (!player) return { error: 'Игрок не найден' }
 
-  console.log(`📜 [PASS] Start | Pending: ${room.state.actionPending} | Player: ${player.name}`)
+  console.log(`📜 [PASS] Start | Pending: ${room.state.actionPending} | Payment:`, JSON.stringify(room.state.pendingPayment))
 
-  // 🔹 1️⃣ Обработка ОПЛАТЫ / БОНУСА (INFO)
+  // 🔹 1️⃣ INFO (Аренда/Налог/Бонус)
   if (room.state.actionPending === 'INFO') {
     const pay = room.state.pendingPayment
 
@@ -80,14 +76,17 @@ export function handlePassAction(room: Room, playerId: string, roomViews: Map<st
           }
           room.addLog(`✅ ${player.name} оплатил ${pay.amount}₽`)
         } else {
-          room.addLog(`⚠️ У ${player.name} не хватает денег на ${pay.amount}₽. Долг сохранён.`)
+          room.addLog(`⚠️ У ${player.name} недостаточно средств для оплаты ${pay.amount}₽. Долг сохранён.`)
         }
       } else if (pay.type === 'bonus') {
         player.money += pay.amount
         room.addLog(`✅ ${player.name} получил бонус ${pay.amount}₽`)
       }
-      // Очищаем только после обработки
+      // Очищаем только после успешной обработки
       room.state.pendingPayment = null
+    } else {
+      // 🔑 FALLBACK: если pendingPayment потерялся, просто закрываем действие
+      console.warn(`⚠️ [PASS] INFO action but pendingPayment is missing. Auto-resolving.`)
     }
 
     room.state.actionPending = 'NONE'
@@ -95,29 +94,74 @@ export function handlePassAction(room: Room, playerId: string, roomViews: Map<st
     // Обработка дублей
     if (room.state.lastRollWasDouble && player.consecutiveDoubles < 3) {
       room.state.actionPending = 'DOUBLE_TURN'
-      console.log(`📜 [PASS] INFO -> KEEP_TURN (DOUBLE)`)
     } else {
       room.finishTurn()
-      console.log(`📜 [PASS] INFO -> FINISH_TURN`)
     }
 
     broadcast(roomViews, room.id, { type: 'SYNC_STATE', payload: buildSyncPayload(room.state) })
     return { success: true }
   }
 
-  // 🔹 2️⃣ Закрытие КАРТ (CARD)
+  // 🔹 2️⃣ CARD
+  // 🔹 2️⃣ Обработка КАРТЫ (по кнопке "Далее")
   if (room.state.actionPending === 'CARD') {
+    const card = room.state.pendingCard
+    const player = room.getPlayer(playerId)!
+
+    // 🔑 Выполняем эффект ТОЛЬКО сейчас
+    if (card) {
+      switch (card.action) {
+        case 'move':
+          // Бонус за проход СТАРТА
+          if (player.pos > (card.targetSpaceId || 0)) {
+            player.money += 200
+            room.addLog(`💰 ${player.name} получил 200₽ за СТАРТ (по карте)`)
+          }
+          player.pos = card.targetSpaceId || 0
+          room.addLog(`🔀 ${player.name} перемещён на клетку ${player.pos}`)
+          break
+        case 'move_back':
+          player.pos = (player.pos - (card.steps || 0) + 40) % 40
+          break
+        case 'receive':
+          player.money += card.amount || 0
+          room.addLog(`🎁 ${player.name} получил ${card.amount}₽`)
+          break
+        case 'pay':
+          player.money -= card.amount || 0
+          room.addLog(`💸 ${player.name} заплатил ${card.amount}₽`)
+          break
+        case 'go_to_jail':
+          player.pos = 10
+          player.isInJail = true
+          player.jailTurns = 0
+          player.consecutiveDoubles = 0
+          room.addLog(`🚔 ${player.name} отправлен в тюрьму по карте!`)
+          broadcast(roomViews, room.id, { type: 'GO_TO_JAIL', playerId })
+          break
+        case 'get_jail_card':
+          player.jailCards = (player.jailCards || 0) + 1
+          room.addLog(`🎫 ${player.name} получил карту "Выход из тюрьмы"`)
+          break
+      }
+    }
+
+    // Очищаем карту и действие
+    room.state.pendingCard = null
     room.state.actionPending = 'NONE'
+
+    // Обработка дублей
     if (room.state.lastRollWasDouble && player.consecutiveDoubles < 3) {
       room.state.actionPending = 'DOUBLE_TURN'
     } else {
       room.finishTurn()
     }
+
     broadcast(roomViews, room.id, { type: 'SYNC_STATE', payload: buildSyncPayload(room.state) })
     return { success: true }
   }
 
-  // 🔹 3️⃣ Закрытие ПОКУПКИ / ДУБЛЯ
+  // 🔹 3️⃣ BUY / DOUBLE_TURN
   if (['BUY', 'DOUBLE_TURN'].includes(room.state.actionPending)) {
     room.state.actionPending = 'NONE'
     if (room.state.lastRollWasDouble && player.consecutiveDoubles < 3) {
@@ -129,6 +173,5 @@ export function handlePassAction(room: Room, playerId: string, roomViews: Map<st
     return { success: true }
   }
 
-  console.log(`📜 [PASS] No active action to resolve. Pending: ${room.state.actionPending}`)
   return { error: 'Нет активных действий' }
 }

@@ -343,26 +343,16 @@ const getPlayerName = (id: string) => store.players.find(p => p.id === id)?.name
             <p class="text-gray-500 text-sm md:text-base">Ход: <span class="font-semibold text-gray-800">{{ getPlayerName(store.currentTurn) }}</span></p>
 
             <!-- 🧪 Дебаг-селект (скрыт по умолчанию) -->
-            <div v-if="true" class="w-full max-w-xs mt-1">
-              <label class="text-[9px] md:text-[10px] font-semibold text-gray-400 mb-0.5 block text-center">🧪 Все ячейки (0-39):</label>
+            <div class="w-full max-w-xs mt-1">
+              <label class="text-[9px] md:text-[10px] font-semibold text-gray-400 mb-0.5 block text-center">🧪 Тест-бросок (выбери ячейку):</label>
               <select v-model="debugTarget" class="w-full bg-gray-100 border border-gray-300 rounded-lg px-2 py-1 text-[10px] md:text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 max-h-48 overflow-y-auto">
                 <option :value="null">🎲 Случайный бросок</option>
-                <optgroup label="🏁 Угловые">
-                  <option :value="0">0️⃣ СТАРТ</option><option :value="10">🔒 ТЮРЬМА</option>
-                  <option :value="20">🚗 БЕСПЛАТНАЯ СТОЯНКА</option><option :value="30">🚔 ИДИ В ТЮРЬМУ</option>
-                </optgroup>
-                <optgroup label="🟤 Коричневые"><option :value="1">1️⃣ Ленинградская</option><option :value="3">3️⃣ Вилоновская</option></optgroup>
-                <optgroup label="💧 Голубые"><option :value="6">6️⃣ пр. Кирова</option><option :value="8">8️⃣ ул. Куйбышева</option><option :value="9">9️⃣ Мичурина</option></optgroup>
-                <optgroup label="🌸 Розовые"><option :value="11">1️⃣1️⃣ Галактионовская</option><option :value="13">1️⃣3️⃣ Купеческая</option><option :value="14">1️⃣4️⃣ Некрасовская</option></optgroup>
-                <optgroup label="🟠 Оранжевые"><option :value="16">1️⃣6️⃣ ул. Полевая</option><option :value="18">1️⃣8️⃣ Братьев Коростылевых</option><option :value="19">1️⃣9️⃣ Красноармейская</option></optgroup>
-                <optgroup label="🔴 Красные"><option :value="21">2️⃣1️⃣ ул. Осипенко</option><option :value="23">2️⃣3️⃣ ул. Садовая</option><option :value="24">2️⃣4️⃣ Аэродромная</option></optgroup>
-                <optgroup label="🟡 Жёлтые"><option :value="26">2️⃣6️⃣ пр. Ленина</option><option :value="27">2️⃣7️⃣ ул. Спортивная</option><option :value="29">2️⃣9️⃣ Арцыбушевская</option></optgroup>
-                <optgroup label="🟢 Зелёные"><option :value="31">3️⃣1️⃣ ул. Ново-Садовая</option><option :value="32">3️⃣2️⃣ ул. Стара-Загора</option><option :value="34">3️⃣4️⃣ ул. Мичурина</option></optgroup>
-                <optgroup label="🔵 Синие"><option :value="37">3️⃣7️⃣ ул. Фрунзе</option><option :value="39">3️⃣9️⃣ ул. Советской Армии</option></optgroup>
-                <optgroup label="🚂 Транспорт"><option :value="5">5️⃣ ЖД Вокзал</option><option :value="15">1️⃣5️⃣ Речной Вокзал</option><option :value="25">2️⃣5️⃣ Автовокзал</option><option :value="35">3️⃣5️⃣ Аэропорт Курумоч</option></optgroup>
-                <optgroup label="⚡ Коммуналки"><option :value="12">1️⃣2️⃣ Водоканал</option><option :value="28">2️⃣8️⃣ Электросети</option></optgroup>
-                <optgroup label="🃏 Карты"><option :value="2">2️⃣ Казна</option><option :value="7">7️⃣ Шанс</option><option :value="17">1️⃣7️⃣ Казна</option><option :value="22">2️⃣2️⃣ Шанс</option><option :value="33">3️⃣3️⃣ Казна</option><option :value="36">3️⃣6️⃣ Шанс</option></optgroup>
-                <optgroup label="📉 Налоги"><option :value="4">4️⃣ Подоходный налог</option><option :value="38">3️⃣8️⃣ Налог на роскошь</option></optgroup>
+                <template v-for="space in spaces" :key="space.id">
+                  <option :value="space.id" class="py-0.5">
+                    {{ String(space.id).padStart(2, '0') }}. {{ space.name }}
+                    <span v-if="space.price > 0" class="text-gray-500">({{ space.price }}₽)</span>
+                  </option>
+                </template>
               </select>
             </div>
 

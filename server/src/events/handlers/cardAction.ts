@@ -2,72 +2,46 @@
 import type { Room } from '../../rooms/Room'
 import type { RoomView } from '../../rooms/RoomManager'
 import { broadcast, buildSyncPayload } from '../../lib/ws-utils'
-import { getSpaceById } from '../../shared/boardConfig'
 
-type CardAction = 'pay' | 'receive' | 'move' | 'go_to_jail' | 'get_card' | 'move_to_start'
-
-const CARDS: {
-  id: string, text: string, action: CardAction,
-  money?: number, move?: number, goToJail?: boolean, jailCard?: number
-}[] = [
-  { id: 'c1', text: 'Отправляйтесь на СТАРТ. Получите 200₽', action: 'move_to_start', move: 0, money: 200 },
-  { id: 'c2', text: 'Банковская ошибка в вашу пользу. Получите 200₽', action: 'receive', money: 200 },
-  { id: 'c3', text: 'Оплата услуг врача. Заплатите 50₽', action: 'pay', money: -50 },
-  { id: 'c4', text: 'Штраф за превышение скорости. Заплатите 15₽', action: 'pay', money: -15 },
-  { id: 'c5', text: 'Карта "Выход из тюрьмы"', action: 'get_card', jailCard: 1 },
-  { id: 'c6', text: 'Отправляйтесь в тюрьму', action: 'go_to_jail', goToJail: true },
-  { id: 'c7', text: 'Отправляйтесь на пр. Кирова', action: 'move', move: 6 },
-  { id: 'c8', text: 'Ваш вклад погашен. Получите 100₽', action: 'receive', money: 100 },
+// 🔹 Пример колоды (замени на свою, если она в другом файле)
+const CHANCE_CARDS = [
+  { text: 'Отправляйтесь на пр. Кирова', action: 'move', targetSpaceId: 6 },
+  { text: 'Банковская ошибка в вашу пользу. Получите 200₽', action: 'receive', amount: 200 },
+  { text: 'Штраф за превышение скорости. Заплатите 15₽', action: 'pay', amount: 15 },
+  { text: 'Идите в тюрьму. Не проходите СТАРТ', action: 'go_to_jail' },
+  { text: 'Вы выиграли кроссворд. Получите 50₽', action: 'receive', amount: 50 },
+  { text: 'Вернитесь на 3 клетки назад', action: 'move_back', steps: 3 }
 ]
 
-export function handleDrawCard(room: Room, playerId: string, type: string, roomViews: Map<string, RoomView>) {
+const COMMUNITY_CARDS = [
+  { text: 'Вы выиграли второй приз в конкурсе красоты. Получите 100₽', action: 'receive', amount: 100 },
+  { text: 'Оплата обучения. Заплатите 50₽', action: 'pay', amount: 50 },
+  { text: 'Отправляйтесь на СТАРТ', action: 'move', targetSpaceId: 0 },
+  { text: 'Идите в тюрьму', action: 'go_to_jail' },
+  { text: 'Карта "Выход из тюрьмы"', action: 'get_jail_card' },
+  { text: 'Наследство. Получите 150₽', action: 'receive', amount: 150 }
+]
+
+export function handleDrawCard(
+  room: Room,
+  playerId: string,
+  cardType: 'chance' | 'community',
+  roomViews: Map<string, RoomView>
+) {
   const player = room.getPlayer(playerId)
-  if (!player) return { error: 'Игрок не найден' }
+  if (!player) return { success: false }
 
-  const card = CARDS[Math.floor(Math.random() * CARDS.length)]
-  const oldPos = player.pos // 🔑 Запоминаем позицию ДО перемещения
+  // 🔑 Выбираем случайную карту
+  const deck = cardType === 'chance' ? CHANCE_CARDS : COMMUNITY_CARDS
+  const card = deck[Math.floor(Math.random() * deck.length)]
 
-  // Применяем эффекты карты
-  if (card.move !== undefined) {
-    player.pos = card.move
-
-    // 🔑 ПРОВЕРКА ПРОХОДА ЧЕРЕЗ СТАРТ (как в rollDice)
-    // Если новая позиция меньше старой (пересечение 39→0) ИЛИ точное попадание на 0
-    if (player.pos < oldPos || player.pos === 0) {
-      player.money += 200
-      room.addLog(`💰 ${player.name} получил 200₽ за СТАРТ (по карте)`)
-    }
-
-    room.addLog(`🔀 ${player.name} перемещён на клетку ${card.move}`)
-    broadcast(roomViews, room.id, { type: 'PLAYER_MOVED', playerId, from: oldPos, to: player.pos })
-  }
-
-  if (card.money) {
-    player.money += card.money
-    room.addLog(`💰 ${player.name}: ${card.money > 0 ? '+' : ''}${card.money}₽`)
-  }
-  if (card.jailCard) player.jailCards += card.jailCard
-  if (card.goToJail) {
-    player.pos = 10
-    player.isInJail = true
-    player.jailTurns = 0
-    player.consecutiveDoubles = 0
-    room.addLog(`🚔 ${player.name} отправлен в тюрьму по карте!`)
-
-// 🔑 КРИТИЧНО: сначала обновляем состояние, потом рассылаем
-    broadcast(roomViews, room.id, { type: 'GO_TO_JAIL', playerId, reason: 'card' })
-// Не вызываем finishTurn() здесь — ход завершится после обработки действия
-    return { success: true, actionRequired: false }
-  }
-
-  room.addLog(`🃏 ${player.name}: "${card.text}"`)
+  // 🔑 КРИТИЧНО: НЕ ВЫПОЛНЯЕМ эффект! Только сохраняем в состояние
+  room.state.pendingCard = card
   room.state.actionPending = 'CARD'
 
-  broadcast(roomViews, room.id, {
-    type: 'CARD_DRAWN',
-    card: { text: card.text, action: card.action, amount: card.money }
-  })
-  broadcast(roomViews, room.id, { type: 'SYNC_STATE', payload: buildSyncPayload(room.state) })
+  room.addLog(`🃏 ${player.name}: "${card.text}"`)
 
+  // Рассылаем состояние с сохранённой картой
+  broadcast(roomViews, room.id, { type: 'SYNC_STATE', payload: buildSyncPayload(room.state) })
   return { success: true, actionRequired: true }
 }

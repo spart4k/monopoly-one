@@ -10,11 +10,8 @@ const store = useGameStore()
 const { myId } = useSession()
 const emit = defineEmits<{ openDetails: [] }>()
 
-// 🔑 Безопасный ID: если myId.value пуст, берём из sessionStorage
-const currentPlayerId = computed(() => myId.value || sessionStorage.getItem('monopoly_playerId') || '')
-
 const currentPlayer = computed(() => store.players.find(p => p.id === store.currentTurn))
-const isMyTurn = computed(() => !!currentPlayerId.value && store.currentTurn === currentPlayerId.value)
+const isMyTurn = computed(() => !!myId.value && store.currentTurn === myId.value)
 const isInJail = computed(() => currentPlayer.value?.isInJail || false)
 
 const pendingActionSpace = computed(() => {
@@ -48,16 +45,15 @@ const debtAmount = computed(() => {
   return diff > 0 ? diff : 0
 })
 
-// 🔑 Флаг: обязательно ли действие (налог/аренда = нельзя пропустить)
 const isMandatory = computed(() => store.pendingInfo?.isMandatory === true)
 
 const actionPanelPrimaryText = computed(() => {
   const action = store.pendingAction
   if (action === 'BUY') return `Купить за ${paymentAmount.value}₽`
   if (action === 'INFO') {
-    if (store.pendingInfo?.title?.includes('Бонус') || store.pendingInfo?.icon === '🎁') {
-      return `Принять ${paymentAmount.value}₽`
-    }
+    if (store.pendingInfo?.icon === '🎁') return `Принять ${paymentAmount.value}₽`
+    // 🔑 Если не хватает на обязательный платёж → показываем "Банкротство"
+    if (!canAfford.value && isMandatory.value) return '🏳️ Банкротство'
     return `Оплатить ${paymentAmount.value}₽`
   }
   if (action === 'CARD') return 'Прочитайте карту'
@@ -73,32 +69,42 @@ const mainButtonText = computed(() => {
 })
 
 const rollDice = () => {
-  if (!currentPlayerId.value || !isMyTurn.value) return
-  sendEvent({ type: 'ROLL_DICE', playerId: currentPlayerId.value })
+  if (!myId.value || !isMyTurn.value) return
+  sendEvent({ type: 'ROLL_DICE', playerId: myId.value })
 }
 
 const handleMainAction = () => {
   if (pendingActionSpace.value && showActionPanel.value) {
     const action = store.pendingAction
     if (action === 'BUY') {
-      sendEvent({ type: 'BUY_PROPERTY', playerId: currentPlayerId.value, spaceId: pendingActionSpace.value!.id })
-    } else if (action === 'INFO' || action === 'CARD') {
-      sendEvent({ type: 'PASS_ACTION', playerId: currentPlayerId.value })
+      sendEvent({ type: 'BUY_PROPERTY', playerId: myId.value, spaceId: pendingActionSpace.value!.id })
+    } else if (action === 'INFO') {
+      // 🔑 Для налогов/аренды: если не хватает денег → банкротство, иначе → оплата
+      if (!canAfford.value && isMandatory.value) {
+        // 🔴 Банкротство: просто завершаем действие, долг остаётся
+        sendEvent({ type: 'PASS_ACTION', playerId: myId.value })
+      } else {
+        // ✅ Оплата: сервер спишет деньги
+        sendEvent({ type: 'PASS_ACTION', playerId: myId.value })
+      }
+    } else if (action === 'CARD') {
+      sendEvent({ type: 'PASS_ACTION', playerId: myId.value })
     }
   } else {
     rollDice()
   }
 }
 
-const handlePassAction = () => sendEvent({ type: 'PASS_ACTION', playerId: currentPlayerId.value })
-const handlePayJailFine = () => sendEvent({ type: 'PAY_JAIL_FINE', playerId: currentPlayerId.value })
-const handleUseJailCard = () => sendEvent({ type: 'USE_JAIL_CARD', playerId: currentPlayerId.value })
-const handleJailRoll = () => sendEvent({ type: 'ROLL_DICE', playerId: currentPlayerId.value })
+const handlePassAction = () => sendEvent({ type: 'PASS_ACTION', playerId: myId.value })
+const handlePayJailFine = () => sendEvent({ type: 'PAY_JAIL_FINE', playerId: myId.value })
+const handleUseJailCard = () => sendEvent({ type: 'USE_JAIL_CARD', playerId: myId.value })
+const handleJailRoll = () => sendEvent({ type: 'ROLL_DICE', playerId: myId.value })
 </script>
 
 <template>
   <div class="flex flex-col items-center gap-2 md:gap-3 w-full max-w-xs">
 
+    <!-- 🔹 Главная кнопка -->
     <button
         v-if="!showActionPanel && !isInJail"
         @click="handleMainAction"
@@ -108,6 +114,7 @@ const handleJailRoll = () => sendEvent({ type: 'ROLL_DICE', playerId: currentPla
       {{ mainButtonText }}
     </button>
 
+    <!-- 🔹 Панель действий -->
     <div v-if="showActionPanel" class="w-full bg-white/90 backdrop-blur rounded-xl p-3 shadow-lg border border-gray-200 space-y-3">
 
       <!-- 🎨 Мини-шапка -->
@@ -121,15 +128,25 @@ const handleJailRoll = () => sendEvent({ type: 'ROLL_DICE', playerId: currentPla
               {{ pendingActionSpace?.type === 'property' ? 'Улица' : pendingActionSpace?.type === 'railroad' ? 'ЖД' : pendingActionSpace?.type === 'utility' ? '⚡' : pendingActionSpace?.type === 'tax' ? '📉' : pendingActionSpace?.type === 'chance' ? '🎲' : '📋' }}
             </span>
           </div>
-          <p class="text-sm text-gray-600 mt-0.5">
-            <template v-if="store.pendingAction === 'BUY'">💰 Цена: <span class="font-semibold text-green-600">{{ paymentAmount }}₽</span></template>
+          <p class="text-sm text-gray-600 mt-0.5 min-h-[2.5rem]">
+            <!-- 🃏 Карты: показываем текст -->
+            <template v-if="store.pendingAction === 'CARD' && store.pendingCard">
+              <span class="text-gray-700 leading-tight">{{ store.pendingCard.text }}</span>
+            </template>
+            <!-- 🎁 Бонус -->
+            <template v-else-if="store.pendingAction === 'INFO' && store.pendingInfo?.icon === '🎁'">
+              <span class="font-semibold text-green-600">🎁 Бонус: {{ paymentAmount }}₽</span>
+            </template>
+            <!-- 💸📉 Аренда/Налог -->
             <template v-else-if="store.pendingAction === 'INFO'">
-              <span v-if="store.pendingInfo?.icon === '🎁'" class="font-semibold text-green-600">🎁 Бонус: {{ paymentAmount }}₽</span>
-              <span v-else class="font-semibold" :class="canAfford ? 'text-red-600' : 'text-orange-600'">
+              <span class="font-semibold" :class="canAfford ? 'text-red-600' : 'text-orange-600'">
                 {{ store.pendingInfo?.title?.includes('Аренда') ? '💸 Аренда:' : '📉 Налог:' }} {{ paymentAmount }}₽
               </span>
             </template>
-            <template v-else-if="store.pendingAction === 'CARD' && store.pendingCard"><span class="text-gray-700 leading-tight">{{ store.pendingCard.text }}</span></template>
+            <!-- 🏠 Покупка -->
+            <template v-else-if="store.pendingAction === 'BUY'">
+              💰 Цена: <span class="font-semibold text-green-600">{{ paymentAmount }}₽</span>
+            </template>
           </p>
         </div>
       </div>
@@ -137,6 +154,7 @@ const handleJailRoll = () => sendEvent({ type: 'ROLL_DICE', playerId: currentPla
       <!-- 🔑 Кнопки действий -->
       <div class="space-y-2">
 
+        <!-- 🃏 Карты -->
         <template v-if="store.pendingAction === 'CARD'">
           <div class="flex gap-2">
             <button @click="handleMainAction" class="flex-1 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition">▶️ Далее</button>
@@ -144,6 +162,7 @@ const handleJailRoll = () => sendEvent({ type: 'ROLL_DICE', playerId: currentPla
           </div>
         </template>
 
+        <!-- 🏠💸📉 Покупка / Аренда / Налог -->
         <template v-else>
           <!-- Основная кнопка -->
           <button
@@ -151,15 +170,20 @@ const handleJailRoll = () => sendEvent({ type: 'ROLL_DICE', playerId: currentPla
               :disabled="store.pendingAction === 'BUY' && !canAfford"
               class="w-full px-4 py-2.5 font-semibold rounded-lg transition flex items-center justify-center gap-2"
               :class="[
-              store.pendingAction === 'BUY'
-                ? (canAfford ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-gray-400 text-gray-200 cursor-not-allowed')
-                : 'bg-blue-600 hover:bg-blue-700 text-white'
+              // 🔴 Банкротство: если не хватает на обязательный платёж
+              (!canAfford && isMandatory)
+                ? 'bg-red-600 hover:bg-red-700 text-white'
+                // 🟢 Покупка: активна только если хватает денег
+                : (store.pendingAction === 'BUY'
+                    ? (canAfford ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-gray-400 text-gray-200 cursor-not-allowed')
+                    // 🔵 Оплата/Бонус: всегда активна
+                    : 'bg-blue-600 hover:bg-blue-700 text-white')
             ]"
           >
             {{ actionPanelPrimaryText }}
           </button>
 
-          <!-- Вторичные кнопки: НЕТ "Пропустить" для налогов/аренды -->
+          <!-- Вторичные кнопки: НЕТ "Пропустить" для обязательных платежей -->
           <div class="flex gap-2" v-if="!isMandatory || store.pendingAction === 'BUY'">
             <button
                 @click="handlePassAction"
@@ -175,10 +199,10 @@ const handleJailRoll = () => sendEvent({ type: 'ROLL_DICE', playerId: currentPla
             </button>
           </div>
 
-          <!-- Индикатор нехватки (только для обязательных платежей) -->
+          <!-- 🔴 Индикатор нехватки (только для обязательных платежей) -->
           <div v-if="store.pendingAction === 'INFO' && !canAfford && isMandatory" class="text-xs text-red-600 text-center font-medium bg-red-50 px-2 py-1.5 rounded border border-red-200">
             🔴 Не хватает {{ debtAmount }}₽
-            <span class="block text-[10px] text-gray-500 mt-0.5">Ход продолжится, долг сохранится</span>
+            <span class="block text-[10px] text-gray-500 mt-0.5">Нажмите "Банкротство" для продолжения</span>
           </div>
 
           <p v-if="store.pendingAction === 'BUY' && !canAfford" class="text-xs text-red-600 text-center font-medium bg-red-50 px-2 py-1 rounded">

@@ -40,19 +40,18 @@ export function processCellEffects(
   return false
 }
 
+// 🔹 Аренда — ТОЛЬКО устанавливаем pendingPayment, НЕ списываем!
 function handlePropertyCell(
   room: Room, playerId: string, space: any, dice: [number, number], roomViews: Map<string, RoomView>
 ): boolean {
   const owner = room.state.players.find(p => p.properties?.includes(space.id))
 
-  // 🆕 Свободная ячейка → предложение купить
   if (!owner) {
     room.state.actionPending = 'BUY'
     broadcast(roomViews, room.id, { type: 'OFFER_BUY', playerId, spaceId: space.id, price: space.price, name: space.name })
     return true
   }
 
-  // 👤 Чужая собственность → ТОЛЬКО сохраняем ожидание оплаты
   if (owner.id !== playerId) {
     const rent = calculateRent(space.id, owner.id, room.state.players, dice)
     const label = getHouseLabel(owner, space.id)
@@ -77,19 +76,17 @@ function handlePropertyCell(
   return false
 }
 
-// server/src/events/handlers/rollDice/cell.ts
+// 🔹 Налог — ТОЛЬКО устанавливаем pendingPayment, НЕ списываем!
 function handleTaxCell(
   room: Room, playerId: string, space: any, roomViews: Map<string, RoomView>
 ): boolean {
   const tax = space.id === 4 ? 200 : 100
 
-  // 🔑 КРИТИЧНО: сначала устанавливаем состояние
+  // 🔑 КРИТИЧНО: НЕ ТРОГАЕМ ДЕНЬГИ! Только состояние
   room.state.pendingPayment = { amount: tax, creditorId: null, type: 'tax' }
   room.state.actionPending = 'INFO'
 
   room.addLog(`📉 ${room.getPlayer(playerId)?.name} должен заплатить налог ${tax}₽`)
-
-  // 🔑 Потом рассылаем — клиент получит и actionPending, и pendingPayment
   broadcast(roomViews, room.id, {
     type: 'ACTION_REQUIRED',
     title: '📉 Налог',
@@ -102,6 +99,7 @@ function handleTaxCell(
   return true
 }
 
+// 🔹 Карты
 function handleCardCell(
   room: Room, playerId: string, cardType: string, roomViews: Map<string, RoomView>
 ): boolean {
@@ -109,6 +107,7 @@ function handleCardCell(
   return result?.actionRequired || false
 }
 
+// 🔹 "Иди в тюрьму"
 function handleGoToJailCell(
   room: Room, playerId: string, roomViews: Map<string, RoomView>
 ): boolean {
@@ -124,6 +123,7 @@ function handleGoToJailCell(
   return true
 }
 
+// 🔹 Завершение хода
 export function finalizeTurn(
   room: Room, playerId: string, keepTurn: boolean, actionRequired: boolean, roomViews: Map<string, RoomView>
 ): void {
