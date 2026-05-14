@@ -113,12 +113,20 @@ export class Room {
     return true
   }
 
+  // 🔹 Завершение хода (пропускает банкротов)
   finishTurn() {
     const currentPlayer = this.getPlayer(this.state.currentTurn)
     if (currentPlayer) currentPlayer.housesBoughtThisTurn = false
 
-    const idx = this.state.players.findIndex(p => p.id === this.state.currentTurn)
-    const nextPlayer = this.state.players[(idx + 1) % this.state.players.length]
+    // 🔑 Ищем следующего НЕ банкрота
+    let nextIdx = (this.state.players.findIndex(p => p.id === this.state.currentTurn) + 1) % this.state.players.length
+    let attempts = 0
+    while (attempts < this.state.players.length && this.state.players[nextIdx]?.isBankrupt) {
+      nextIdx = (nextIdx + 1) % this.state.players.length
+      attempts++
+    }
+
+    const nextPlayer = this.state.players[nextIdx]
     this.state.currentTurn = nextPlayer?.id || ''
     this.state.actionPending = 'NONE'
     this.state.lastRollWasDouble = false
