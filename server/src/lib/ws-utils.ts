@@ -3,7 +3,7 @@ import type { RoomView } from '../rooms/RoomManager'
 
 // server/src/lib/ws-utils.ts
 export function buildSyncPayload(state: any) {
-  return {
+  const payload = {
     status: state.status,
     players: state.players.map((p: any) => ({
       id: p.id, name: p.name, color: p.color, pos: p.pos, money: p.money,
@@ -21,6 +21,12 @@ export function buildSyncPayload(state: any) {
     pendingPayment: state.pendingPayment,
     activeTrade: state.activeTrade
   }
+
+  if (state.actionPending === 'INFO') {
+    console.log(`📤 [PAYLOAD] SYNC_STATE pendingPayment:`, JSON.stringify(state.pendingPayment))
+  }
+
+  return payload
 }
 
 export function broadcast(

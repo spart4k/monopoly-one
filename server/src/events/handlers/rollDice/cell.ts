@@ -44,6 +44,7 @@ export function processCellEffects(
 function handlePropertyCell(
   room: Room, playerId: string, space: any, dice: [number, number], roomViews: Map<string, RoomView>
 ): boolean {
+  console.log(`🚨 [CELL-NEW] handlePropertyCell CALLED for space ${space.id}`)  // ← УНИКАЛЬНЫЙ лог
   const owner = room.state.players.find(p => p.properties?.includes(space.id))
 
   if (!owner) {
@@ -58,9 +59,12 @@ function handlePropertyCell(
 
     // 🔑 КРИТИЧНО: НЕ ТРОГАЕМ ДЕНЬГИ! Только состояние
     room.state.pendingPayment = { amount: rent, creditorId: owner.id, type: 'rent' }
+    console.log(`🔍 [CELL] Set pendingPayment for rent:`, JSON.stringify(room.state.pendingPayment))
     room.state.actionPending = 'INFO'
 
     room.addLog(`💸 ${room.getPlayer(playerId)?.name} должен заплатить ${rent}₽ аренды за ${space.name} ${label}`)
+    console.log(`🔍 [DEBUG] pendingPayment SET:`, JSON.stringify(room.state.pendingPayment))
+
     broadcast(roomViews, room.id, {
       type: 'ACTION_REQUIRED',
       title: '💸 Аренда',
@@ -84,6 +88,7 @@ function handleTaxCell(
 
   // 🔑 КРИТИЧНО: НЕ ТРОГАЕМ ДЕНЬГИ! Только состояние
   room.state.pendingPayment = { amount: tax, creditorId: null, type: 'tax' }
+  console.log(`🔍 [CELL] Set pendingPayment for tax:`, JSON.stringify(room.state.pendingPayment))
   room.state.actionPending = 'INFO'
 
   room.addLog(`📉 ${room.getPlayer(playerId)?.name} должен заплатить налог ${tax}₽`)

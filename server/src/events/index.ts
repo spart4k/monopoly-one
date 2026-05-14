@@ -2,7 +2,7 @@
 // 📦 Централизованный экспорт всех обработчиков событий
 
 // 🎲 Roll Dice
-export { handleRollDice } from './handlers/rollDice'
+export { handleRollDice } from './handlers/rollDice/index'
 
 // 🏠 Property
 export { handleBuyProperty, handlePassAction } from './handlers/buyProperty'

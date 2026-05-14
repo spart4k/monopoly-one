@@ -56,6 +56,7 @@ export function handleBuyProperty(
 }
 
 export function handlePassAction(room: Room, playerId: string, roomViews: Map<string, RoomView>) {
+  console.log(`🔍 [PASS] Entering | actionPending: ${room.state.actionPending} | pendingPayment:`, JSON.stringify(room.state.pendingPayment))
   if (!playerId || playerId === 'null') return { error: 'Invalid player ID' }
   const player = room.getPlayer(playerId)
   if (!player) return { error: 'Игрок не найден' }

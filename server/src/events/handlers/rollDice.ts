@@ -176,7 +176,8 @@ function processCellEffects(
         name: space.name
       })
       return true
-    } else if (owner.id !== playerId) {
+    }
+    else if (owner.id !== playerId) {
       let rent = calculateRent(space, owner, dice)
       if (rent > 0) {
         const paid = Math.min(player.money, rent)
