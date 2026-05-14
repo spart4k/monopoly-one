@@ -104,32 +104,44 @@ export function handlePassAction(room: Room, playerId: string, roomViews: Map<st
 
   // 🔹 2️⃣ CARD
   // 🔹 2️⃣ Обработка КАРТЫ (по кнопке "Далее")
+  // 🔹 2️⃣ Обработка КАРТЫ (по кнопке "Далее")
   if (room.state.actionPending === 'CARD') {
     const card = room.state.pendingCard
     const player = room.getPlayer(playerId)!
 
-    // 🔑 Выполняем эффект ТОЛЬКО сейчас
+    // 🔑 Если карта требует оплаты → переходим в режим INFO (кнопка "Пропустить" скроется автоматически)
+    if (card && card.action === 'pay') {
+      room.state.pendingPayment = { amount: card.amount || 0, creditorId: null, type: 'tax' }
+      room.state.actionPending = 'INFO'
+      room.addLog(`💳 ${player.name} должен заплатить ${card.amount}₽ по карте`)
+      broadcast(roomViews, room.id, {
+        type: 'ACTION_REQUIRED',
+        title: '💳 Оплата по карте',
+        message: card.text,
+        icon: '💳',
+        amount: card.amount,
+        isMandatory: true // 🔑 Ключевое: UI скроет кнопку "Пропустить"
+      })
+      return { success: true, actionRequired: true }
+    }
+
+    // Выполняем остальные эффекты сразу (движение, бонусы, тюрьма и т.д.)
     if (card) {
       switch (card.action) {
         case 'move':
-          // Бонус за проход СТАРТА
           if (player.pos > (card.targetSpaceId || 0)) {
             player.money += 200
             room.addLog(`💰 ${player.name} получил 200₽ за СТАРТ (по карте)`)
           }
           player.pos = card.targetSpaceId || 0
-          room.addLog(`🔀 ${player.name} перемещён на клетку ${player.pos}`)
           break
         case 'move_back':
           player.pos = (player.pos - (card.steps || 0) + 40) % 40
+          room.addLog(`🔙 ${player.name} вернулся на ${card.steps} клетки назад`)
           break
         case 'receive':
           player.money += card.amount || 0
           room.addLog(`🎁 ${player.name} получил ${card.amount}₽`)
-          break
-        case 'pay':
-          player.money -= card.amount || 0
-          room.addLog(`💸 ${player.name} заплатил ${card.amount}₽`)
           break
         case 'go_to_jail':
           player.pos = 10

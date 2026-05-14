@@ -79,6 +79,17 @@ const canMortgage = computed(() => {
 const mortgageValue = computed(() => props.space?.price ? Math.floor(props.space.price / 2) : 0)
 const unmortgageCost = computed(() => Math.ceil(mortgageValue.value * 1.1))
 
+const hasBothUtilities = computed(() => {
+  if (!props.space || props.space.type !== 'utility') return false
+  // Находим владельца текущей клетки
+  const owner = props.isMyProperty
+      ? store.players.find(p => p.id === myId.value)
+      : store.players.find(p => p.properties?.includes(props.space?.id || -1))
+
+  if (!owner) return false
+  return owner.properties.includes(12) && owner.properties.includes(28)
+})
+
 const cardButton = computed(() => {
   const card = store.pendingCard
   if (!card) return { text: 'Продолжить', color: 'bg-blue-600 hover:bg-blue-700' }
@@ -189,21 +200,24 @@ const hasFullUtilitySet = computed(() => {
 
                 <!-- ⚡ Коммунальные предприятия (исправлено) -->
                 <div v-else-if="space.type === 'utility'" class="text-sm space-y-2">
-                  <div class="p-2 rounded bg-gray-50 border" :class="hasFullUtilitySet ? 'border-green-400 bg-green-50' : 'border-gray-200'">
-                    <p class="flex justify-between">
+                  <div class="border rounded-lg overflow-hidden" :class="hasBothUtilities ? 'border-green-400' : 'border-gray-200'">
+                    <!-- 1 предприятие -->
+                    <div class="flex justify-between p-2 border-b" :class="!hasBothUtilities ? 'bg-green-50 font-semibold text-gray-800' : 'bg-gray-50'">
                       <span>📏 1 предприятие:</span>
                       <span class="font-mono">Сумма кубиков × 4</span>
-                    </p>
-                    <p class="flex justify-between mt-1" :class="hasFullUtilitySet ? 'text-green-700 font-semibold' : ''">
+                    </div>
+                    <!-- 2 предприятия -->
+                    <div class="flex justify-between p-2" :class="hasBothUtilities ? 'bg-green-50 font-semibold text-gray-800' : 'bg-gray-50'">
                       <span>📏 2 предприятия:</span>
                       <span class="font-mono">Сумма кубиков × 10</span>
-                    </p>
+                    </div>
                   </div>
-                  <!-- 🔑 Визуальный индикатор монополии -->
-                  <div v-if="hasFullUtilitySet" class="text-xs text-center text-green-600 font-medium flex items-center justify-center gap-1">
+
+                  <!-- 🔑 Индикатор монополии -->
+                  <div v-if="hasBothUtilities" class="text-xs text-center text-green-600 font-medium flex items-center justify-center gap-1">
                     ✅ Полный комплект: аренда ×10
                   </div>
-                  <p class="mt-1 text-xs text-gray-500">
+                  <p class="text-xs text-gray-500">
                     Текущая к оплате: <span class="font-semibold text-gray-700">{{ requiredAmount || '...' }}₽</span>
                   </p>
                 </div>

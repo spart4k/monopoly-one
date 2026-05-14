@@ -157,8 +157,12 @@ const handleJailRoll = () => sendEvent({ type: 'ROLL_DICE', playerId: myId.value
         <!-- 🃏 Карты -->
         <template v-if="store.pendingAction === 'CARD'">
           <div class="flex gap-2">
-            <button @click="handleMainAction" class="flex-1 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition">▶️ Далее</button>
-            <button @click="emit('openDetails')" class="flex-1 px-3 py-2.5 bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium rounded-lg transition text-sm">📋 Детали</button>
+            <button @click="handleMainAction" class="flex-1 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition">
+              ▶️ Далее
+            </button>
+            <button @click="emit('openDetails')" class="flex-1 px-3 py-2.5 bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium rounded-lg transition text-sm">
+              📋 Детали
+            </button>
           </div>
         </template>
 
