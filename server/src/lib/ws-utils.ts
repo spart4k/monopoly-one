@@ -2,31 +2,26 @@
 import type { RoomView } from '../rooms/RoomManager'
 
 // server/src/lib/ws-utils.ts
+// server/src/lib/ws-utils.ts
 export function buildSyncPayload(state: any) {
-  const payload = {
+  return {
     status: state.status,
     players: state.players.map((p: any) => ({
       id: p.id, name: p.name, color: p.color, pos: p.pos, money: p.money,
       properties: p.properties, houses: p.houses || {}, mortgaged: p.mortgaged || [],
       isInJail: p.isInJail, jailTurns: p.jailTurns, jailCards: p.jailCards,
-      consecutiveDoubles: p.consecutiveDoubles, housesBoughtThisTurn: p.housesBoughtThisTurn || false
+      consecutiveDoubles: p.consecutiveDoubles, housesBoughtThisTurn: p.housesBoughtThisTurn || false,
+      isReady: p.isReady || false  // 🔑 КРИТИЧНО: ДОБАВЬ ЭТУ СТРОКУ
     })),
     currentTurn: state.currentTurn,
     logs: state.logs,
     lastDice: state.lastDice,
-    // 🔑 КРИТИЧНО: эти поля управляют UI-панелями
     actionPending: state.actionPending,
     selectedSpaceId: state.selectedSpaceId,
     pendingCard: state.pendingCard,
     pendingPayment: state.pendingPayment,
     activeTrade: state.activeTrade
   }
-
-  if (state.actionPending === 'INFO') {
-    console.log(`📤 [PAYLOAD] SYNC_STATE pendingPayment:`, JSON.stringify(state.pendingPayment))
-  }
-
-  return payload
 }
 
 export function broadcast(

@@ -3,22 +3,26 @@ services:
     build:
       context: ./server
       dockerfile: Dockerfile
-    ports: ['3000:3000']
+    ports: ['3000:3000', '9229:9229']
     environment:
       - NODE_ENV=development
-      - REDIS_URL=redis://redis:6379  # ⬅️ Добавь это
+      - REDIS_URL=redis://redis:6379
       - DATABASE_URL=postgresql://monopoly:devpass@postgres:5432/monopoly
+      - TSX_WATCH=true
     volumes:
-      - ./server/src:/app/src:ro  # Только исходный код (read-only)
+      # 🔹 Монтируем исходники для hot-reload
+      - ./server/src:/app/src:ro
       - ./server/package.json:/app/package.json:ro
-      - backend_node_modules:/app/node_modules  # ← Именованный том для node_modules!
+      - ./server/pnpm-lock.yaml:/app/pnpm-lock.yaml:ro
+      # 🔹 КРИТИЧНО: "прячем" node_modules контейнера за анонимным томом
+      - /app/node_modules
     command: pnpm dev
     depends_on:
-      redis:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
+      redis: { condition: service_healthy }
+      postgres: { condition: service_healthy }
     networks: [monopoly]
+    stdin_open: true
+    tty: true
 
   frontend:
     build:
@@ -28,39 +32,45 @@ services:
     environment:
       - VITE_WS_URL=ws://backend:3000/ws
       - NODE_ENV=development
-      - CHOKIDAR_USEPOLLING=true  # Важно для hot-reload на Windows
+      - CHOKIDAR_USEPOLLING=true
       - WATCHPACK_POLLING=true
     volumes:
       - ./client/src:/app/src:ro
       - ./client/index.html:/app/index.html:ro
       - ./client/package.json:/app/package.json:ro
-      - frontend_node_modules:/app/node_modules  # ← Именованный том!
+      - ./client/pnpm-lock.yaml:/app/pnpm-lock.yaml:ro
+      # 🔹 КРИТИЧНО: сохраняем node_modules контейнера
+      - /app/node_modules
     command: pnpm dev --host 0.0.0.0
     depends_on: [backend]
     networks: [monopoly]
+    stdin_open: true
+    tty: true
+
   redis:
     image: redis:7-alpine
-    ports: [ '6379:6379' ]
-    volumes:
-      - redis_data:/data
+    ports: ['6379:6379']
+    volumes: [redis_data:/data]
     command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     healthcheck:
-      test: [ 'CMD', 'redis-cli', 'ping' ]
+      test: ['CMD', 'redis-cli', 'ping']
       interval: 5s
       timeout: 3s
       retries: 5
+    networks: [monopoly]
+
   postgres:
     image: postgres:15-alpine
-    ports: [ '5432:5432' ]  # Для доступа из DBeaver/pgAdmin
+    ports: ['5432:5432']
     environment:
       POSTGRES_USER: monopoly
       POSTGRES_PASSWORD: devpass
       POSTGRES_DB: monopoly
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./server/sql:/docker-entrypoint-initdb.d  # Авто-применение миграций
+      - ./server/sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: [ 'CMD-SHELL', 'pg_isready -U monopoly -d monopoly' ]
+      test: ['CMD-SHELL', 'pg_isready -U monopoly -d monopoly']
       interval: 5s
       timeout: 3s
       retries: 5
@@ -70,13 +80,12 @@ services:
       -c effective_cache_size=512MB
       -c work_mem=4MB
       -c max_connections=50
+    networks: [monopoly]
 
 networks:
   monopoly:
     driver: bridge
 
 volumes:
-  backend_node_modules:  # ← Ключевое: именованные тома для node_modules
-  frontend_node_modules:
   redis_data:
   postgres_data:

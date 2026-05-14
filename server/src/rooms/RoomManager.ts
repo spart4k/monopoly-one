@@ -1,38 +1,48 @@
-import { Room, type RoomState } from './Room'
-import type { WebSocket } from 'ws'
-import { getRoomState, saveRoomState } from '../lib/redis'
-
-export type RoomView = { sockets: Map<string, WebSocket>; state: RoomState }
+// server/src/rooms/RoomManager.ts
+import { Room } from './Room'
+import type { RoomView } from './Room'
 
 export class RoomManager {
-  private activeRooms = new Map<string, Room>()
+  public activeRooms = new Map<string, Room>()
 
-  async getOrCreateRoom(roomId: string): Promise<Room> {
-    if (this.activeRooms.has(roomId)) {
-      return this.activeRooms.get(roomId)!
+  getRoom(id: string): Room | undefined {
+    return this.activeRooms.get(id)
+  }
+
+  async getOrCreateRoom(id: string): Promise<Room> {
+    let room = this.activeRooms.get(id)
+    if (!room) {
+      room = new Room(id)
+      this.activeRooms.set(id, room)
+      console.log(`🏗 [ROOM] Created new room: ${id}`)
     }
-    console.log(`🏗 [ROOM] Создаю новую комнату: ${roomId}`)
-    const savedState = await getRoomState(roomId)
-    const room = new Room(roomId, savedState || undefined)
-    this.activeRooms.set(roomId, room)
     return room
   }
 
-  getRoom(roomId: string): Room | undefined {
-    return this.activeRooms.get(roomId)
-  }
-
-  async syncRoom(roomId: string): Promise<void> {
-    const room = this.activeRooms.get(roomId)
-    if (room) await saveRoomState(roomId, room.state)
-  }
-
-  // 🔑 Ключевой метод: возвращает карту { roomId -> { sockets, state } }
   getAllRoomViews(): Map<string, RoomView> {
     const views = new Map<string, RoomView>()
     for (const [id, room] of this.activeRooms) {
-      views.set(id, { sockets: room.getSockets(), state: room.state })
+      views.set(id, {
+        id,
+        state: room.state,
+        sockets: room.getSockets()
+      })
     }
     return views
+  }
+
+  // 🔹 НОВЫЙ: Удаление комнаты
+  removeRoom(roomId: string): boolean {
+    const room = this.activeRooms.get(roomId)
+    if (!room) return false
+
+    // Закрываем сокеты
+    for (const [pid, socket] of room.sockets) {
+      if (socket.readyState === 1) socket.close()
+    }
+
+    const deleted = this.activeRooms.delete(roomId)
+    console.log(`🗑 [ROOM] Removed room: ${roomId}, success: ${deleted}`)
+    return deleted
   }
 }

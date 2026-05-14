@@ -3,18 +3,18 @@ FROM node:20-alpine
 WORKDIR /app
 
 # Устанавливаем pnpm глобально
-RUN npm install -g pnpm@latest
+RUN npm install -g pnpm
 
-# Копируем только манифесты для кэширования слоя зависимостей
-COPY package.json ./
+# Копируем манифесты ПЕРЕД кодом для кэширования слоя install
+COPY package.json pnpm-lock.yaml ./
 
-# Устанавливаем зависимости (это попадёт в именованный том при запуске)
-RUN pnpm install --frozen-lockfile || pnpm install
+# Устанавливаем зависимости ВНУТРИ образа
+RUN pnpm install --frozen-lockfile
 
-# Копируем остальной код (будет перекрыто маунтом, но нужно для сборки)
+# Копируем исходный код
 COPY . .
 
-EXPOSE 3000
+EXPOSE 3000 9229
+ENV NODE_OPTIONS="--inspect=0.0.0.0:9229"
 
-# Запускаем в dev-режиме
 CMD ["pnpm", "dev"]

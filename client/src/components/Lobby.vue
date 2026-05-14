@@ -1,279 +1,170 @@
 <!-- client/src/components/Lobby.vue -->
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useGameStore } from '../stores/game'
-import { sendEvent } from '../lib/ws'
+import { useAuth } from '../composables/useAuth'
 import { useSession } from '../composables/useSession'
-import { getPlayerColorHex } from '../shared/playerColors'
+import { sendEvent } from '../lib/ws'
+import AuthModal from './AuthModal.vue'
 
 const store = useGameStore()
-const { myId, roomId, playerName, setSession, clearSession } = useSession()
+const auth = useAuth()
+const session = useSession()
 
-const targetRoom = ref('')
-const username = ref(playerName.value || localStorage.getItem('monopoly_username') || '')
+const username = ref('')
+const roomName = ref('')
+const showAuthModal = ref(false)
 
-// Сохраняем имя в localStorage (оно должно сохраняться между сессиями)
-watch(username, (v) => {
-  localStorage.setItem('monopoly_username', v)
-  // Синхронизируем с сессией, если она активна
-  if (playerName.value !== v) {
-    playerName.value = v
-    sessionStorage.setItem('monopoly_playerName', v)
-  }
-})
+// 🔑 Состояния комнаты
+const isInRoom = computed(() => !!session.roomId.value && store.status === 'LOBBY')
+const me = computed(() => store.players.find(p => p.id === session.myId.value))
+const isMyReady = computed(() => me.value?.isReady ?? false)
+const isHost = computed(() => store.players.length > 0 && store.players[0].id === session.myId.value)
+const canStart = computed(() =>
+    isHost.value &&
+    store.players.length >= 2 &&
+    store.players.every(p => p.isReady || p.id === session.myId.value)
+)
 
+// 🔑 Авто-подстановка имени
 onMounted(() => {
-  const { myId: sessionMyId, ensureSession } = useSession()
-
-  // 🔑 Гарантируем сессию с именем из инпута
-  ensureSession(username.value)
-
-  // Синхронизируем локальный ref с сессией (если нужно)
-  if (!myId.value && sessionMyId.value) {
-    myId.value = sessionMyId.value
-  }
-
-  // 🔑 Авто-возврат в комнату (только если сессия валидна)
-  const savedRoom = roomId.value
-  const savedName = playerName.value || username.value.trim()
-
-  if (savedRoom && myId.value && savedName) {
-    console.log('🔄 [LOBBY] Auto-rejoining:', myId.value, 'in room', savedRoom)
-    sendEvent({
-      type: 'JOIN_ROOM',
-      roomId: savedRoom,
-      playerId: myId.value,
-      name: savedName
-    })
-  }
-
-  // Запрашиваем список комнат
+  session.ensureSession()
+  if (auth.user.value?.nickname) username.value = auth.user.value.nickname
+  else if (session.playerName.value && !username.value) username.value = session.playerName.value
   sendEvent({ type: 'GET_LOBBY' })
 })
 
-const rooms = computed(() => store.availableRooms || [])
-const isHost = (room: any) => room.createdBy === myId.value
-const isInRoom = (room: any) => room.players.some((p: any) => p.id === myId.value)
-const myStatus = (room: any) => room.players.find((p: any) => p.id === myId.value)
-const allReady = (room: any) => room.players.every((p: any) => p.isReady || p.id === room.createdBy)
-
-// 🔑 Присоединение к комнате — с приоритетом нового roomId
-const joinRoom = (roomIdValue: string) => {
-  if (!username.value.trim()) {
-    alert('Введите имя')
-    return
-  }
-
-  const cleanRoomId = roomIdValue.trim()
-  if (!cleanRoomId) return
-
-  // 🔑 Сохраняем сессию для авто-возврата
-  setSession(myId.value!, cleanRoomId, username.value.trim())
-
-  // 🔑 Отправляем событие с ЯВНЫМ roomId (он будет иметь приоритет в sendEvent)
-  sendEvent({
-    type: 'JOIN_ROOM',
-    roomId: cleanRoomId,  // 🔑 Явное значение — приоритет над кэшем
-    playerId: myId.value,
-    name: username.value.trim()
-  })
+// 🔑 Действия с защитой от дублей
+const handleCreate = () => {
+  if (isInRoom.value || !roomName.value.trim()) return
+  const name = username.value.trim() || auth.user.value?.nickname || 'Player'
+  sendEvent({ type: 'JOIN_ROOM', roomId: roomName.value, playerId: session.myId.value, name })
 }
 
-const toggleReady = (roomIdValue: string) => {
-  const p = rooms.value.find(r => r.id === roomIdValue)?.players.find((pl: any) => pl.id === myId.value)
-  if (!p) return
+const handleJoin = (id: string) => {
+  if (isInRoom.value) return
+  const name = username.value.trim() || auth.user.value?.nickname || 'Player'
+  sendEvent({ type: 'JOIN_ROOM', roomId: id, playerId: session.myId.value, name })
+}
+
+const toggleReady = () => {
+  if (!isInRoom.value || !session.roomId.value) return
   sendEvent({
     type: 'SET_READY',
-    roomId: roomIdValue,
-    playerId: myId.value,
-    isReady: !p.isReady
+    playerId: session.myId.value,
+    roomId: session.roomId.value,
+    isReady: !isMyReady.value
   })
 }
 
-const startGame = (roomIdValue: string) => {
-  sendEvent({
-    type: 'START_GAME',
-    roomId: roomIdValue,
-    playerId: myId.value
-  })
+const startGame = () => {
+  if (!canStart.value) return
+  sendEvent({ type: 'START_GAME', playerId: session.myId.value, roomId: session.roomId.value })
 }
 
-// 🔑 Создание НОВОЙ комнаты — сбрасываем старую сессию
-const createNewRoom = () => {
-  if (!username.value.trim()) {
-    alert('Введите имя')
-    return
-  }
-
-  const newRoomId = targetRoom.value.trim() || `Room-${Math.random().toString(36).slice(2, 6)}`
-
-  // 🔑 КРИТИЧНО: очищаем старую сессию, чтобы не было авто-реконнекта к прошлой комнате
-  clearSession()
-
-  // Устанавливаем новую сессию
-  setSession(myId.value!, newRoomId, username.value.trim())
-
-  // Отправляем запрос на создание/вход
-  sendEvent({
-    type: 'JOIN_ROOM',
-    roomId: newRoomId,  // 🔑 Явное новое значение
-    playerId: myId.value,
-    name: username.value.trim()
-  })
-
-  // Очищаем инпут
-  targetRoom.value = ''
+const leaveRoom = () => {
+  session.clearSession()
+  sendEvent({ type: 'GET_LOBBY' })
 }
 
-const fillSlots = (players: any[], max: number) => {
-  const slots = players.map((p: any) => p)
-  while (slots.length < max) slots.push(null)
-  return slots
+const handleAuthSuccess = () => {
+  showAuthModal.value = false
+  if (auth.user.value?.nickname) username.value = auth.user.value.nickname
 }
-
-watch(() => store.availableRooms, (rooms) => {
-  console.log(`🔄 [LOBBY] availableRooms updated: ${rooms?.length || 0} rooms`, rooms)
-}, { immediate: true, deep: true })
-
 </script>
 
 <template>
-  <div class="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white flex flex-col">
-    <header class="p-6 border-b border-gray-700 flex justify-between items-center bg-gray-900/50 backdrop-blur">
-      <h1 class="text-3xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">🎲 Monopoly</h1>
-      <div class="flex items-center gap-4">
-        <input
-            v-model="username"
-            class="px-3 py-1.5 bg-gray-700 rounded-lg text-sm border border-gray-600 focus:border-blue-500 outline-none"
-            placeholder="Ваш ник"
-        />
-        <button
-            @click="sendEvent({ type: 'GET_LOBBY' })"
-            class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm transition"
-        >🔄 Обновить</button>
-      </div>
-    </header>
+  <div class="min-h-screen bg-gray-900 text-white flex items-center justify-center p-4">
+    <div class="w-full max-w-md bg-gray-800 rounded-2xl shadow-xl p-6 space-y-6">
 
-    <main class="flex-1 p-6 grid grid-cols-1 lg:grid-cols-3 gap-6 max-w-7xl mx-auto w-full">
-      <!-- Список комнат -->
-      <div class="lg:col-span-2 space-y-4">
-        <h2 class="text-xl font-semibold mb-2">📡 Комнаты</h2>
+      <h1 class="text-2xl font-bold text-center">🎲 Монополия Онлайн</h1>
 
-        <div v-if="rooms.length === 0" class="bg-gray-800/50 rounded-xl p-8 text-center border border-gray-700 border-dashed">
-          <p class="text-gray-400">Нет открытых комнат. Создайте новую 👉</p>
-        </div>
-
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div
-              v-for="room in rooms"
-              :key="room.id"
-              class="bg-gray-800 rounded-xl p-4 border border-gray-700 hover:border-blue-500/50 transition flex flex-col"
-          >
-            <div class="flex justify-between items-start mb-3">
-              <span class="font-mono text-lg font-bold text-blue-400">🏠 {{ room.id }}</span>
-              <span class="text-xs px-2 py-0.5 rounded bg-green-900/40 text-green-300 border border-green-800/50">
-                {{ room.status === 'PLAYING' ? '🎮 В игре' : '⏳ Ожидание' }}
-              </span>
-            </div>
-
-            <!-- Слоты игроков -->
-            <div class="grid grid-cols-2 gap-2 mb-4">
-              <div
-                  v-for="(slot, i) in fillSlots(room.players, room.maxPlayers)"
-                  :key="i"
-                  class="p-3 rounded bg-gray-900/60 text-center border border-gray-700/50 flex flex-col items-center justify-center gap-2"
-                  :class="slot ? 'border-blue-500/30 bg-blue-900/20' : 'border-dashed'"
-              >
-                <div
-                    v-if="slot"
-                    class="w-10 h-10 rounded-full border-2 border-white/90 shadow-md flex items-center justify-center text-lg font-bold text-white"
-                    :style="{ backgroundColor: getPlayerColorHex(slot.color) }"
-                >
-                  {{ slot.name?.charAt(0).toUpperCase() }}
-                </div>
-                <div v-else class="w-10 h-10 rounded-full border-2 border-dashed border-gray-600 flex items-center justify-center text-gray-500">?</div>
-                <span class="font-medium text-white text-sm truncate w-full">{{ slot?.name || 'Свободно' }}</span>
-                <span
-                    v-if="slot"
-                    class="text-xs px-1.5 rounded"
-                    :class="slot.isReady ? 'bg-green-900/50 text-green-300' : 'bg-yellow-900/50 text-yellow-300'"
-                >
-                  {{ slot.isReady ? '✅ Готов' : '⏳ Ожидание' }}
-                </span>
-              </div>
-            </div>
-
-            <div class="text-xs text-gray-400 mb-3 flex justify-between">
-              <span>💰 1500₽</span>
-              <span>👥 {{ room.players.length }}/4</span>
-            </div>
-
-            <!-- Кнопки действий -->
-            <div class="mt-auto">
-              <template v-if="isHost(room) && room.status === 'LOBBY'">
-                <div class="relative group">
-                  <button
-                      @click="startGame(room.id)"
-                      :disabled="!allReady(room)"
-                      class="w-full py-2.5 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 disabled:from-gray-600 disabled:to-gray-700 disabled:cursor-not-allowed text-white rounded-lg font-semibold transition shadow-lg"
-                  >🚀 Начать игру</button>
-                  <div
-                      v-if="!allReady(room)"
-                      class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 bg-gray-900 text-gray-200 text-xs rounded shadow-lg opacity-0 group-hover:opacity-100 transition pointer-events-none whitespace-nowrap border border-gray-700 z-10"
-                  >⚠️ Дождитесь готовности всех игроков</div>
-                </div>
-              </template>
-
-              <template v-else-if="isInRoom(room) && room.status === 'LOBBY'">
-                <button
-                    @click="toggleReady(room.id)"
-                    class="w-full py-2.5 rounded-lg font-semibold transition border"
-                    :class="myStatus(room)?.isReady ? 'bg-green-600/20 text-green-400 border-green-500/50' : 'bg-yellow-600/20 text-yellow-400 border-yellow-500/50 hover:bg-yellow-600/30'"
-                >
-                  {{ myStatus(room)?.isReady ? '✅ Готов' : '⏳ Готов' }}
-                </button>
-              </template>
-
-              <template v-else-if="room.status === 'LOBBY'">
-                <button
-                    @click="joinRoom(room.id)"
-                    class="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold transition shadow-lg"
-                >👋 Присоединиться</button>
-              </template>
-
-              <button v-else disabled class="w-full py-2.5 bg-gray-700 text-gray-400 rounded-lg cursor-not-allowed">🔒 Закрыта</button>
-            </div>
+      <!-- 🔐 Блок авторизации -->
+      <div class="flex items-center justify-between bg-gray-700/50 rounded-lg p-3">
+        <template v-if="auth.isAuthenticated.value">
+          <div class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-green-500"></span>
+            <span class="text-sm font-medium">{{ auth.user.value?.nickname }}</span>
           </div>
-        </div>
+          <button @click="auth.logout" class="text-xs text-red-400 hover:text-red-300 underline">Выйти</button>
+        </template>
+        <button v-else @click="showAuthModal = true" class="w-full flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm font-medium transition">
+          🔐 Войти / Регистрация
+        </button>
       </div>
 
-      <!-- Панель создания/входа -->
-      <div class="bg-gray-800 rounded-xl p-6 border border-gray-700 h-fit sticky top-6">
-        <h3 class="text-lg font-semibold mb-4">⚡ Войти или создать</h3>
-        <div class="space-y-4">
-          <div>
-            <label class="block text-gray-300 text-sm mb-1.5">Название комнаты</label>
-            <input
-                v-model="targetRoom"
-                class="w-full px-3 py-2 bg-gray-900 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-blue-500 outline-none"
-                placeholder="Room123"
-                @keyup.enter="createNewRoom"
-            />
-          </div>
+      <!-- 🎮 ЭКРАН КОМНАТЫ -->
+      <div v-if="isInRoom" class="space-y-4">
+        <div class="text-center">
+          <h2 class="text-xl font-bold text-green-400">🚪 Комната: {{ session.roomId }}</h2>
+          <p class="text-sm text-gray-400 mt-1">Ожидание игроков и готовности</p>
+        </div>
 
-          <button
-              @click="createNewRoom"
-              class="w-full py-2.5 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white rounded-lg font-semibold transition shadow-lg"
-          >
-            {{ targetRoom.trim() ? '🔗 Войти / Создать' : '🆕 Создать случайную' }}
+        <div class="bg-gray-700/50 rounded-lg p-4 space-y-2">
+          <h3 class="text-sm font-semibold text-gray-300">Игроки ({{ store.players.length }}/4)</h3>
+          <div v-for="p in store.players" :key="p.id" class="flex items-center justify-between bg-gray-800/60 p-2 rounded">
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full" :class="p.id === session.myId.value ? 'bg-blue-500' : 'bg-gray-400'"></span>
+              <span class="font-medium">{{ p.name }} <span v-if="p.id === session.myId.value" class="text-xs text-blue-400">(Вы)</span></span>
+            </div>
+            <!-- 🔑 Берём статус напрямую из стора -->
+            <span class="text-xs px-2 py-1 rounded" :class="p.isReady ? 'bg-green-600/20 text-green-400' : 'bg-gray-600/20 text-gray-400'">
+              {{ p.isReady ? '✅ Готов' : '⏳ Ожидание' }}
+            </span>
+          </div>
+        </div>
+
+        <div class="flex gap-2">
+          <button @click="toggleReady" class="flex-1 py-2.5 rounded-lg font-semibold transition" :class="isMyReady ? 'bg-yellow-600 hover:bg-yellow-700' : 'bg-green-600 hover:bg-green-700'">
+            {{ isMyReady ? '❌ Отменить' : '✅ Я готов' }}
           </button>
+          <button v-if="isHost" @click="startGame" :disabled="!canStart" class="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed rounded-lg font-semibold transition">
+            🚀 Начать игру
+          </button>
+        </div>
 
-          <!-- Подсказка -->
-          <p class="text-xs text-gray-500 text-center">
-            Введите название или оставьте пустым для случайной комнаты
-          </p>
+        <button @click="leaveRoom" class="w-full py-2 bg-red-900/50 hover:bg-red-900/80 text-red-300 rounded-lg text-sm transition">
+          🚪 Покинуть комнату
+        </button>
+      </div>
+
+      <!-- 🌐 ЭКРАН ВЫБОРА КОМНАТ -->
+      <div v-else class="space-y-4">
+        <div v-if="!auth.isAuthenticated.value">
+          <label class="block text-sm text-gray-400 mb-1">Ваше имя</label>
+          <input v-model="username" placeholder="Игрок123" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </div>
+
+        <div>
+          <label class="block text-sm text-gray-400 mb-1">Название комнаты</label>
+          <input v-model="roomName" placeholder="Room123" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </div>
+
+        <button @click="handleCreate" class="w-full py-2.5 bg-green-600 hover:bg-green-700 rounded-lg font-semibold transition">
+          🏠 Создать комнату
+        </button>
+
+        <div class="pt-4 border-t border-gray-700">
+          <h2 class="text-sm font-semibold text-gray-400 mb-2">Доступные комнаты</h2>
+          <div v-if="!store.availableRooms?.length" class="text-gray-500 text-sm text-center py-4">Нет активных комнат</div>
+          <div v-else class="space-y-2 max-h-48 overflow-y-auto">
+            <div v-for="room in store.availableRooms" :key="room.id" class="flex items-center justify-between bg-gray-700/40 rounded-lg px-3 py-2">
+              <div>
+                <div class="font-medium">{{ room.id }}</div>
+                <div class="text-xs text-gray-400">{{ room.players?.length || 0 }}/4 игроков</div>
+              </div>
+              <button @click="handleJoin(room.id)" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 rounded text-sm transition">
+                Войти
+              </button>
+            </div>
+          </div>
         </div>
       </div>
-    </main>
+
+      <!-- 🔐 Модалка -->
+      <Teleport to="body">
+        <AuthModal v-if="showAuthModal" @close="handleAuthSuccess" />
+      </Teleport>
+    </div>
   </div>
 </template>
