@@ -37,7 +37,7 @@ fastify.register(fastifyCors, { origin: '*' })
 fastify.register(fastifyWebsocket)
 
 // 🔹 2. REST-роуты админки
-registerAdminRoutes(fastify)
+registerAdminRoutes(fastify, roomManager)
 
 // 🔹 Хелпер рассылки списка лобби
 function broadcastLobbyUpdate(targetSocket?: any) {
