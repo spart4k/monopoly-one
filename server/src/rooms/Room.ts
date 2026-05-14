@@ -1,9 +1,7 @@
-// server/src/rooms/Room.ts
 import type { WebSocket } from 'ws'
 import { CONSTANTS } from '../config/constants'
-import { buildSyncPayload } from '../lib/ws-utils'
+import { buildSyncPayload, broadcast } from '../lib/ws-utils'
 
-// 🔑 Типы
 export type Player = {
   id: string
   name: string
@@ -19,6 +17,7 @@ export type Player = {
   consecutiveDoubles: number
   isReady?: boolean
   housesBoughtThisTurn: boolean
+  isBankrupt: boolean
 }
 
 export type RoomState = {
@@ -29,22 +28,13 @@ export type RoomState = {
   lastDice: [number, number]
   actionPending: 'NONE' | 'BUY' | 'CARD' | 'INFO' | 'DOUBLE_TURN'
   lastRollWasDouble: boolean
-  activeTrade: TradeState | null
+  activeTrade: any | null
   selectedSpaceId: number | null
   pendingCard: any
   pendingInfo: any
   pendingPayment: { amount: number; creditorId: string | null; type: 'rent' | 'tax' | 'bonus' } | null
-}
-
-export type TradeOffer = { properties: number[], money: number, jailCards: number }
-export type TradeState = {
-  initiator: string
-  responder: string
-  from: TradeOffer
-  to: TradeOffer
-  status: 'draft' | 'proposed'
-  lastProposer: string | null
-  messages: { from: string, text: string, ts: number }[]
+  winnerId: string | null
+  gameOver: boolean
 }
 
 export class Room {
@@ -66,80 +56,64 @@ export class Room {
       pendingCard: null,
       pendingInfo: null,
       pendingPayment: null,
+      winnerId: null,
+      gameOver: false,
       ...initialState
     }
   }
 
-  // 🔹 Геттеры
   getPlayer(id: string) { return this.state.players.find(p => p.id === id) }
-  getPlayerIdByName(name: string): string | null {
-    const player = this.state.players.find(p => p.name === name)
-    return player?.id || null
-  }
   get playerCount() { return this.state.players.length }
   getNextColor() { return CONSTANTS.COLORS[this.state.players.length % CONSTANTS.COLORS.length] }
-  getSockets() { return new Map(this.sockets) }
 
-  // 🔹 Сокеты
   addSocket(pid: string, sock: WebSocket) {
     this.sockets.set(pid, sock)
-    ;(sock as any).playerId = pid // 🔑 Запоминаем игрока на сокете
+    ;(sock as any).playerId = pid
   }
   removeSocket(pid: string) { this.sockets.delete(pid) }
 
-  // 🔹 Игрок
-  addPlayer(p: Omit<Player, 'properties' | 'houses' | 'isInJail' | 'jailTurns' | 'jailCards' | 'consecutiveDoubles' | 'isReady' | 'mortgaged'>) {
+  addPlayer(p: Omit<Player, 'properties' | 'houses' | 'isInJail' | 'jailTurns' | 'jailCards' | 'consecutiveDoubles' | 'isReady' | 'mortgaged' | 'isBankrupt'>) {
     const isFirst = this.state.players.length === 0
     const newP: Player = {
       ...p,
-      properties: [],
-      houses: {},
-      mortgaged: [],
-      isInJail: false,
-      jailTurns: 0,
-      jailCards: 0,
-      consecutiveDoubles: 0,
-      housesBoughtThisTurn: false,
+      properties: [], houses: {}, mortgaged: [],
+      isInJail: false, jailTurns: 0, jailCards: 0,
+      consecutiveDoubles: 0, housesBoughtThisTurn: false,
       isReady: isFirst,
+      isBankrupt: false
     }
     this.state.players.push(newP)
     return newP
   }
 
-  // 🔹 Лог
   addLog(msg: string) {
     this.state.logs.push(msg)
-    if (this.state.logs.length > 50) this.state.logs.shift()
+    if (this.state.logs.length > 100) this.state.logs.shift()
   }
 
-  // 🔹 Рассылка состояния всем подключенным в комнате
   broadcastState() {
     const payload = buildSyncPayload(this.state)
     for (const [_, socket] of this.sockets) {
-      if (socket.readyState === 1) {
-        socket.send(JSON.stringify({ type: 'SYNC_STATE', payload }))
-      }
+      if (socket.readyState === 1) socket.send(JSON.stringify({ type: 'SYNC_STATE', payload }))
     }
   }
 
-  // 🔹 Старт игры
+  getSockets() { return this.sockets }
+
   startGame() {
     if (this.state.players.length < 2) return false
-    this.state.actionPending = 'NONE'
-    this.state.lastRollWasDouble = false
     this.state.status = 'PLAYING'
     this.state.currentTurn = this.state.players[0]?.id || ''
+    this.state.actionPending = 'NONE'
+    this.state.lastRollWasDouble = false
+    this.state.gameOver = false
+    this.state.winnerId = null
     this.addLog('🎮 Игра началась!')
-    if (this.state.currentTurn) {
-      this.addLog(`🎲 Ход начинает ${this.getPlayer(this.state.currentTurn)?.name}`)
-    }
     this.broadcastState()
     return true
   }
 
-  // 🔹 Завершение хода
   finishTurn() {
-    // 🔑 Сбрасываем лимит домов для текущего игрока
     const currentPlayer = this.getPlayer(this.state.currentTurn)
     if (currentPlayer) currentPlayer.housesBoughtThisTurn = false
 
@@ -153,17 +127,44 @@ export class Room {
     this.broadcastState()
   }
 
-  // 🔹 Бросок костей (валидация)
-  rollDice(playerId: string) {
-    if (this.state.status !== 'PLAYING') return { success: false, error: '🚫 Игра не активна' }
-    if (this.state.currentTurn !== playerId) return { success: false, error: '🚫 Не ваш ход' }
-    if (this.state.actionPending !== 'NONE' && this.state.actionPending !== 'DOUBLE_TURN') {
-      return { success: false, error: '🚫 Сначала завершите действие' }
+  checkGameOver(): { isOver: boolean; winnerId: string | null } {
+    const activePlayers = this.state.players.filter(p => !p.isBankrupt)
+    if (activePlayers.length === 1) return { isOver: true, winnerId: activePlayers[0].id }
+    if (activePlayers.length === 0) return { isOver: true, winnerId: null }
+    return { isOver: false, winnerId: null }
+  }
+
+  declareBankrupt(playerId: string, roomViews: Map<string, any>) {
+    const player = this.getPlayer(playerId)
+    if (!player || player.isBankrupt) return
+
+    player.isBankrupt = true
+    player.money = 0
+    this.addLog(`🏳️ ${player.name} объявил банкротство`)
+
+    const { isOver, winnerId } = this.checkGameOver()
+
+    if (isOver) {
+      this.state.gameOver = true
+      this.state.winnerId = winnerId
+      this.state.actionPending = 'NONE'
+      this.state.status = 'ENDED'
+
+      const winner = winnerId ? this.getPlayer(winnerId) : null
+      this.addLog(`🏆 ${winner?.name || 'Никто'} победил! Игра завершена.`)
+
+      broadcast(roomViews, this.id, {
+        type: 'GAME_OVER',
+        winnerId,
+        winnerName: winner?.name || null,
+        reason: 'bankruptcy'
+      })
     }
-    const p = this.getPlayer(playerId)
-    if (!p) return { success: false, error: '🚫 Игрок не найден' }
-    const dice: [number, number] = [Math.ceil(Math.random() * 6), Math.ceil(Math.random() * 6)]
-    this.state.lastDice = dice
-    return { success: true, dice, from: p.pos }
+
+    if (this.state.currentTurn === playerId && !isOver) {
+      this.finishTurn()
+    } else {
+      this.broadcastState()
+    }
   }
 }
