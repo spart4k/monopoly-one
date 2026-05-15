@@ -1,16 +1,13 @@
-// server/src/lib/db.ts
 import { Pool } from 'pg'
 
 const connectionString = process.env.DATABASE_URL
 if (!connectionString) {
   console.error('💥 [DB] DATABASE_URL is not set in .env!')
-  console.error('Example: postgresql://user:pass@127.0.0.1:5432/dbname')
   process.exit(1)
 }
 
 const pool = new Pool({ connectionString })
 
-// 🔹 Тест подключения при старте
 pool.connect()
   .then(client => {
     console.log('🐘 [DB] Connected to PostgreSQL')
@@ -18,16 +15,11 @@ pool.connect()
   })
   .catch(err => {
     console.error('💥 [DB] Connection failed:', err.message)
-    if (err.message.includes('password must be a string')) {
-      console.error('🔑 Fix: Check DATABASE_URL in .env — password might be undefined or contain unencoded special chars')
-      console.error('🔑 Example: postgresql://user:p%40ss%21word@127.0.0.1:5432/db')
-    }
     process.exit(1)
   })
 
 export async function query(text: string, params?: any[]) {
-  const res = await pool.query(text, params)
-  return res
+  return await pool.query(text, params)
 }
 
 export async function getUserByEmail(email: string) {
@@ -50,6 +42,39 @@ export async function createUser(email: string, nickname: string, passwordHash: 
 
 export async function updateLastLogin(userId: string) {
   await query('UPDATE users SET last_login = NOW() WHERE id = $1', [userId])
+}
+
+// 🔹 GAME PERSISTENCE
+export async function saveGameStart(roomId: string, hostId?: string) {
+  return query(
+    `INSERT INTO games (room_id, host_id, status) VALUES ($1, $2, 'PLAYING') RETURNING id`,
+    [roomId, hostId]
+  )
+}
+
+export async function saveGameSnapshot(roomId: string, state: any) {
+  const gameRes = await query(`SELECT id FROM games WHERE room_id = $1`, [roomId])
+  if (!gameRes.rows[0]) return
+  return query(
+    `INSERT INTO game_snapshots (game_id, snapshot_data) VALUES ($1, $2)`,
+    [gameRes.rows[0].id, JSON.stringify(state)]
+  )
+}
+
+export async function logGameEvent(roomId: string, playerId: string, type: string, data: any = {}) {
+  const gameRes = await query(`SELECT id FROM games WHERE room_id = $1`, [roomId])
+  if (!gameRes.rows[0]) return
+  return query(
+    `INSERT INTO game_events (game_id, player_id, event_type, event_data) VALUES ($1, $2, $3, $4)`,
+    [gameRes.rows[0].id, playerId, type, JSON.stringify(data)]
+  )
+}
+
+export async function saveGameEnd(roomId: string, winnerId: string | null, finalState: any) {
+  return query(
+    `UPDATE games SET status = 'ENDED', ended_at = NOW(), winner_id = $2, final_state = $3, duration = NOW() - started_at WHERE room_id = $1 RETURNING id`,
+    [roomId, winnerId, JSON.stringify(finalState)]
+  )
 }
 
 export { pool }

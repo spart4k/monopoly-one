@@ -1,4 +1,3 @@
-<!-- client/src/components/Lobby.vue -->
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useGameStore } from '../stores/game'
@@ -11,7 +10,6 @@ const store = useGameStore()
 const auth = useAuth()
 const session = useSession()
 
-const username = ref('')
 const roomName = ref('')
 const showAuthModal = ref(false)
 
@@ -23,22 +21,20 @@ const canStart = computed(() => isHost.value && store.players.length >= 2 && sto
 
 onMounted(() => {
   session.ensureSession()
-  if (auth.user.value?.nickname) username.value = auth.user.value.nickname
-  else if (session.playerName.value && !username.value) username.value = session.playerName.value
+  if (auth.user.value?.nickname) roomName.value = `Room_${Math.floor(Math.random()*9000)+1000}`
   sendEvent({ type: 'GET_LOBBY' })
 })
 
-const handleCreate = () => { if (!roomName.value.trim() || isInRoom.value) return; sendEvent({ type: 'JOIN_ROOM', roomId: roomName.value, playerId: session.myId.value, name: username.value.trim() || auth.user.value?.nickname }) }
-const handleJoin = (id: string) => { if (isInRoom.value) return; sendEvent({ type: 'JOIN_ROOM', roomId: id, playerId: session.myId.value, name: username.value.trim() || auth.user.value?.nickname }) }
+const handleCreate = () => { if (!roomName.value.trim() || isInRoom.value) return; sendEvent({ type: 'JOIN_ROOM', roomId: roomName.value.trim(), playerId: session.myId.value, name: auth.user.value?.nickname || session.playerName.value || 'Player' }) }
+const handleJoin = (id: string) => { if (isInRoom.value) return; sendEvent({ type: 'JOIN_ROOM', roomId: id, playerId: session.myId.value, name: auth.user.value?.nickname || session.playerName.value || 'Player' }) }
 const toggleReady = () => { if (isInRoom.value) sendEvent({ type: 'SET_READY', playerId: session.myId.value, roomId: session.roomId.value, isReady: !isMyReady.value }) }
 const startGame = () => { if (canStart.value) sendEvent({ type: 'START_GAME', playerId: session.myId.value, roomId: session.roomId.value }) }
 const leaveRoom = () => { session.clearSession(); sendEvent({ type: 'GET_LOBBY' }) }
-const handleAuthSuccess = () => { showAuthModal.value = false; if (auth.user.value?.nickname) username.value = auth.user.value.nickname }
+const handleAuthSuccess = () => { showAuthModal.value = false }
 </script>
 
 <template>
   <div class="min-h-screen bg-gray-900 text-white flex flex-col">
-    <!-- 🔝 Шапка с профилем -->
     <header class="bg-gray-800 border-b border-gray-700 px-6 py-3 flex items-center justify-between">
       <div class="flex items-center gap-3">
         <span class="text-2xl">🎲</span>
@@ -53,12 +49,11 @@ const handleAuthSuccess = () => { showAuthModal.value = false; if (auth.user.val
     </header>
 
     <main class="flex-1 flex overflow-hidden">
-      <!-- 📋 Список всех комнат -->
       <div class="flex-1 p-6 overflow-y-auto">
         <div class="flex items-center justify-between mb-4">
           <h2 class="text-lg font-semibold">Доступные комнаты</h2>
           <div class="flex gap-2">
-            <input v-model="roomName" placeholder="Создать комнату..." class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500" @keyup.enter="handleCreate" />
+            <input v-model="roomName" placeholder="Название комнаты..." class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500" @keyup.enter="handleCreate" />
             <button @click="handleCreate" class="px-3 py-1.5 bg-green-600 hover:bg-green-700 rounded-lg text-sm font-medium transition">Создать</button>
           </div>
         </div>
@@ -74,18 +69,14 @@ const handleAuthSuccess = () => { showAuthModal.value = false; if (auth.user.val
             </div>
             <div class="flex items-center gap-2 text-sm text-gray-400">
               <span>👤 {{ room.players?.length || 0 }}/4</span>
-              <span class="text-gray-600">•</span>
-              <span>Создатель: {{ room.createdBy ? '...' : 'Система' }}</span>
             </div>
             <button class="w-full mt-3 py-1.5 bg-gray-700 hover:bg-blue-600 rounded text-sm transition">Войти</button>
           </div>
         </div>
       </div>
 
-      <!-- 🚪 Активная комната (боковая панель) -->
       <aside v-if="isInRoom" class="w-80 bg-gray-800 border-l border-gray-700 p-5 flex flex-col">
         <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">🚪 Комната <span class="text-blue-400">{{ session.roomId }}</span></h2>
-
         <div class="bg-gray-700/40 rounded-lg p-3 mb-4 space-y-2">
           <div v-for="p in store.players" :key="p.id" class="flex items-center justify-between text-sm">
             <div class="flex items-center gap-2">
@@ -95,7 +86,6 @@ const handleAuthSuccess = () => { showAuthModal.value = false; if (auth.user.val
             <span class="text-xs" :class="p.isReady ? 'text-green-400' : 'text-gray-400'">{{ p.isReady ? '✅' : '⏳' }}</span>
           </div>
         </div>
-
         <div class="space-y-2 mt-auto">
           <button @click="toggleReady" class="w-full py-2.5 rounded-lg font-medium transition" :class="isMyReady ? 'bg-yellow-600 hover:bg-yellow-700' : 'bg-green-600 hover:bg-green-700'">
             {{ isMyReady ? '❌ Отменить готовность' : '✅ Я готов' }}
