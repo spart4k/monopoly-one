@@ -1,47 +1,92 @@
 // server/src/events/handlers/cardAction.ts
 import type { Room } from '../../rooms/Room'
 import type { RoomView } from '../../rooms/RoomManager'
-import { broadcast, buildSyncPayload } from '../../lib/ws-utils'
+import { broadcast } from '../../lib/ws-utils'
+import { CARDS, type Card } from '../../shared/boardConfig'
+import { processCellEffects, finalizeTurn } from './rollDice/cell'
 
-// 🔹 Пример колоды (замени на свою, если она в другом файле)
-const CHANCE_CARDS = [
-  { text: 'Отправляйтесь на пр. Кирова', action: 'move', targetSpaceId: 6 },
-  { text: 'Банковская ошибка в вашу пользу. Получите 200₽', action: 'receive', amount: 200 },
-  { text: 'Штраф за превышение скорости. Заплатите 15₽', action: 'pay', amount: 15 },
-  { text: 'Идите в тюрьму. Не проходите СТАРТ', action: 'go_to_jail' },
-  { text: 'Вы выиграли кроссворд. Получите 50₽', action: 'receive', amount: 50 },
-  { text: 'Вернитесь на 3 клетки назад', action: 'move_back', steps: 3 }
-]
-
-const COMMUNITY_CARDS = [
-  { text: 'Вы выиграли второй приз в конкурсе красоты. Получите 100₽', action: 'receive', amount: 100 },
-  { text: 'Оплата обучения. Заплатите 50₽', action: 'pay', amount: 50 },
-  { text: 'Отправляйтесь на СТАРТ', action: 'move', targetSpaceId: 0 },
-  { text: 'Идите в тюрьму', action: 'go_to_jail' },
-  { text: 'Карта "Выход из тюрьмы"', action: 'get_jail_card' },
-  { text: 'Наследство. Получите 150₽', action: 'receive', amount: 150 }
-]
+const CARD_DECKS = {
+  chance: CARDS.chance,
+  community: CARDS.community
+}
 
 export function handleDrawCard(
   room: Room,
   playerId: string,
-  cardType: 'chance' | 'community',
+  cardType: string,
   roomViews: Map<string, RoomView>
 ) {
   const player = room.getPlayer(playerId)
-  if (!player) return { success: false }
+  if (!player) return { error: 'Игрок не найден' }
 
-  // 🔑 Выбираем случайную карту
-  const deck = cardType === 'chance' ? CHANCE_CARDS : COMMUNITY_CARDS
-  const card = deck[Math.floor(Math.random() * deck.length)]
-
-  // 🔑 КРИТИЧНО: НЕ ВЫПОЛНЯЕМ эффект! Только сохраняем в состояние
-  room.state.pendingCard = card
-  room.state.actionPending = 'CARD'
+  const deck = CARD_DECKS[cardType as keyof typeof CARD_DECKS] || CARD_DECKS.chance
+  const card: Card = deck[Math.floor(Math.random() * deck.length)]
 
   room.addLog(`🃏 ${player.name}: "${card.text}"`)
 
-  // Рассылаем состояние с сохранённой картой
-  broadcast(roomViews, room.id, { type: 'SYNC_STATE', payload: buildSyncPayload(room.state) })
-  return { success: true, actionRequired: true }
+  // 🔹 Обработка действий карты
+  switch (card.action) {
+    case 'move':
+      if (player.pos > (card.targetSpaceId || 0)) {
+        player.money += 200
+        room.addLog(`💰 ${player.name} получил 200₽ за СТАРТ (по карте)`)
+      }
+      player.pos = card.targetSpaceId || 0
+      break
+    case 'move_back':
+      player.pos = (player.pos - (card.steps || 0) + 40) % 40
+      room.addLog(`🔙 ${player.name} вернулся на ${card.steps} клетки назад`)
+      break
+    case 'receive':
+      player.money += card.amount || 0
+      room.addLog(`🎁 ${player.name} получил ${card.amount}₽`)
+      break
+    case 'pay':
+      player.money -= card.amount || 0
+      room.addLog(`💸 ${player.name} заплатил ${card.amount}₽ по карте`)
+      break
+    case 'go_to_jail':
+      player.pos = 10; player.isInJail = true; player.jailTurns = 0; player.consecutiveDoubles = 0
+      broadcast(roomViews, room.id, { type: 'GO_TO_JAIL', playerId })
+      room.finishTurn()
+      return { success: true, actionRequired: true }
+    case 'get_jail_card':
+      player.jailCards = (player.jailCards || 0) + 1
+      room.addLog(`🎫 ${player.name} получил карту "Выход из тюрьмы"`)
+      break
+  }
+
+  // 🔑 КРИТИЧНО: После перемещения проверяем эффекты новой клетки!
+  if (card.action === 'move' || card.action === 'move_back') {
+    room.state.actionPending = 'NONE'
+    const actionRequired = processCellEffects(room, playerId, player.pos, room.state.lastDice, roomViews)
+    if (!actionRequired) {
+      finalizeTurn(room, playerId, room.state.lastRollWasDouble, false, roomViews)
+    }
+    return { success: true, actionRequired: true }
+  }
+
+  // 🔹 Для карт с оплатой/получением — только ОДИН вызов finalizeTurn!
+  if (card.action === 'pay' || card.action === 'receive') {
+    if (card.action === 'pay' && player.money < 0) {
+      room.state.pendingPayment = { amount: Math.abs(player.money), creditorId: null, type: 'rent' }
+      room.state.actionPending = 'INFO'
+      broadcast(roomViews, room.id, {
+        type: 'ACTION_REQUIRED',
+        title: '💸 Оплата карты',
+        message: 'Оплатите штраф по карте',
+        icon: '💸',
+        amount: Math.abs(player.money),
+        isMandatory: true
+      })
+      return { success: true, actionRequired: true }
+    }
+    // ✅ Оплата/получение прошло успешно — завершаем ход и ВЫХОДИМ
+    finalizeTurn(room, playerId, room.state.lastRollWasDouble, false, roomViews)
+    return { success: true, actionRequired: false }
+  }
+
+  // 🔹 Для остальных карт (get_jail_card, none) — тоже один вызов
+  finalizeTurn(room, playerId, room.state.lastRollWasDouble, false, roomViews)
+  return { success: true, actionRequired: false }
 }

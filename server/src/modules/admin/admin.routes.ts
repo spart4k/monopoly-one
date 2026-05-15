@@ -17,28 +17,28 @@ export function registerAdminRoutes(app: FastifyInstance, roomManager: any) {
     return reply.send(res.rows)
   })
 
-  // 🔑 LIVE-МАТЧИ: берём из памяти + обогащаем хостами
   app.get('/admin/games/live', { preHandler: authenticate }, (req, reply) => {
     const liveRooms = []
     for (const [id, room] of roomManager.activeRooms.entries()) {
       liveRooms.push({
-        id: room.id,
-        status: room.state.status,
+        id: room.id, status: room.state.status,
         players: room.state.players.map(p => ({ id: p.id, name: p.name, money: p.money, isBankrupt: p.isBankrupt, isReady: p.isReady })),
-        logs: room.state.logs.slice(-50), // последние 50 логов
-        currentTurn: room.state.currentTurn,
-        actionPending: room.state.actionPending
+        logs: room.state.logs.slice(-50), currentTurn: room.state.currentTurn, actionPending: room.state.actionPending
       })
     }
     return reply.send(liveRooms)
   })
 
-  // 🔑 ИСТОРИЯ МАТЧЕЙ (из БД)
+  // 🔹 ИСТОРИЯ: Без JOIN, безопасно для VARCHAR winner_id
   app.get('/admin/games/history', { preHandler: authenticate }, async (req, reply) => {
     const res = await query(`
-      SELECT g.id, g.room_id, g.status, g.started_at, g.ended_at, u.nickname as winner_name
-      FROM games g LEFT JOIN users u ON g.winner_id = u.id
-      ORDER BY g.started_at DESC LIMIT 100
+        SELECT
+            id, room_id, status, started_at, ended_at, winner_id,
+            duration,
+            final_state::json as final_state  -- 🔑 Явное приведение к JSON
+        FROM games
+        ORDER BY started_at DESC
+            LIMIT 50
     `)
     return reply.send(res.rows)
   })

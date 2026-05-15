@@ -67,3 +67,38 @@ export const BOARD_CONFIG: ISpaceData[] = [
 export function getSpaceById(id: number): ISpaceData | undefined {
   return BOARD_CONFIG.find(s => s.id === id)
 }
+
+// 🔹 В конец server/src/shared/boardConfig.ts
+
+// 🔹 Тип карты
+export interface Card {
+  text: string
+  action: 'move' | 'move_back' | 'receive' | 'pay' | 'go_to_jail' | 'get_jail_card' | 'none'
+  amount?: number
+  targetSpaceId?: number
+  steps?: number
+}
+
+// 🔹 Колоды карт
+export const CARDS = {
+  chance: [
+    { text: 'Идите в тюрьму. Не проходите СТАРТ', action: 'go_to_jail' as const },
+    { text: 'Отправляйтесь на СТАРТ', action: 'move' as const, targetSpaceId: 0 },
+    { text: 'Вернитесь на 3 клетки назад', action: 'move_back' as const, steps: 3 },
+    { text: 'Штраф за превышение скорости. Заплатите 15₽', action: 'pay' as const, amount: 15 },
+    { text: 'Вы выиграли кроссворд. Получите 50₽', action: 'receive' as const, amount: 50 },
+    { text: 'Оплата обучения. Заплатите 50₽', action: 'pay' as const, amount: 50 },
+    { text: 'Банковская ошибка в вашу пользу. Получите 200₽', action: 'receive' as const, amount: 200 },
+    { text: 'Получите карту "Выход из тюрьмы"', action: 'get_jail_card' as const },
+  ],
+  community: [
+    { text: 'Получите 200₽ за СТАРТ', action: 'receive' as const, amount: 200 },
+    { text: 'Оплата за лечение. Заплатите 100₽', action: 'pay' as const, amount: 100 },
+    { text: 'Подарок от бабушки. Получите 100₽', action: 'receive' as const, amount: 100 },
+    { text: 'Идите в тюрьму', action: 'go_to_jail' as const },
+    { text: 'Вы получили наследство. Получите 100₽', action: 'receive' as const, amount: 100 },
+    { text: 'Оплата страховки. Заплатите 50₽', action: 'pay' as const, amount: 50 },
+    { text: 'Получите карту "Выход из тюрьмы"', action: 'get_jail_card' as const },
+    { text: 'Налоговый возврат. Получите 20₽', action: 'receive' as const, amount: 20 },
+  ]
+}
