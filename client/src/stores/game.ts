@@ -65,7 +65,14 @@ export const useGameStore = defineStore('game', () => {
         case 'OFFER_BUY': pendingAction.value = 'BUY'; selectedSpaceId.value = event.spaceId; break
         case 'GO_TO_JAIL':
           const pJail = players.value.find((p: Player) => p.id === event.playerId)
-          if (pJail) { pJail.pos = 10; pJail.isInJail = true; pJail.jailTurns = 0; pJail.consecutiveDoubles = 0 }
+          if (pJail) {
+            // 🔹 Реальное перемещение (после отложенного приговора)
+            pJail.pos = 10
+            pJail.isInJail = true
+            pJail.jailTurns = 0
+            pJail.consecutiveDoubles = 0
+            logs.value.unshift(`🚔 ${pJail.name} перемещён в тюрьму`)
+          }
           break
         case 'ACTION_REQUIRED':
           pendingAction.value = 'INFO'; pendingInfo.value = event; selectedSpaceId.value = event.spaceId ?? null; break

@@ -10,6 +10,22 @@ import {
 } from '../../../lib/gameRules'
 import { handleDrawCard } from '../cardAction'
 
+function processPendingJail(room: Room, roomViews: Map<string, RoomView>) {
+  for (const player of room.state.players) {
+    if (player.pendingJail && player.id !== room.state.currentTurn) {
+      // 🔹 Перемещаем в тюрьму ТОЛЬКО если это НЕ текущий игрок
+      player.pos = 10
+      player.isInJail = true
+      player.jailTurns = 0
+      player.consecutiveDoubles = 0
+      player.pendingJail = false
+
+      room.addLog(`🚔 ${player.name} перемещён в тюрьму`)
+      broadcast(roomViews, room.id, { type: 'GO_TO_JAIL', playerId: player.id })
+    }
+  }
+}
+
 export function processCellEffects(
   room: Room,
   playerId: string,
@@ -17,6 +33,8 @@ export function processCellEffects(
   dice: [number, number],
   roomViews: Map<string, RoomView>
 ): boolean {
+  processPendingJail(room, roomViews)
+
   const player = room.getPlayer(playerId)
   const space = getSpaceById(spaceId)
   if (!player || !space) return false
@@ -140,6 +158,7 @@ function handleCardCell(
 }
 
 // 🔹 Клетка "Иди в тюрьму"
+// 🔹 Клетка "Иди в тюрьму" — ОТЛОЖЕННЫЙ ПЕРЕХОД
 function handleGoToJailCell(
   room: Room,
   playerId: string,
@@ -148,13 +167,19 @@ function handleGoToJailCell(
   const player = room.getPlayer(playerId)
   if (!player) return false
 
-  player.pos = 10
-  player.isInJail = true
-  player.jailTurns = 0
-  player.consecutiveDoubles = 0
+  // 🔹 НЕ перемещаем сразу! Только ставим флаг "приговорён"
+  player.pendingJail = true
 
-  room.addLog(`🚔 ${player.name} отправлен в тюрьму!`)
-  broadcast(roomViews, room.id, { type: 'GO_TO_JAIL', playerId })
+  room.addLog(`⚖️ ${player.name} приговорён к тюрьме (переместится после хода следующего игрока)`)
+
+  // 🔹 Отправляем событие для клиента (можно показать анимацию "приговора")
+  broadcast(roomViews, room.id, {
+    type: 'JAIL_SENTENCED',
+    playerId,
+    message: `${player.name} отправлен в тюрьму!`
+  })
+
+  // 🔹 Возвращаем false → ход завершится автоматически, но позиция НЕ изменится
   return false
 }
 

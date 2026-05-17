@@ -259,7 +259,7 @@ const getPlayerName = (id: string) => store.players.find(p => p.id === id)?.name
               <span v-if="store.gameOver" class="ml-2 px-2 py-0.5 bg-red-100 text-red-600 rounded-full text-xs font-bold">ИГРА ОКОНЧЕНА</span>
             </p>
 
-            <div v-if="false" class="w-full max-w-xs mt-1">
+            <div v-if="true" class="w-full max-w-xs mt-1">
               <label class="text-[9px] md:text-[10px] font-semibold text-gray-400 mb-0.5 block text-center">🧪 Все ячейки (0-39):</label>
               <select v-model="debugTarget" class="w-full bg-gray-100 border border-gray-300 rounded-lg px-2 py-1 text-[10px] md:text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 max-h-48 overflow-y-auto">
                 <option :value="null">🎲 Случайный бросок</option>

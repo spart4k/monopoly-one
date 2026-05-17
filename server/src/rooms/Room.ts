@@ -7,7 +7,7 @@ export type Player = {
   id: string; name: string; color: string; pos: number; money: number
   properties: number[]; mortgaged: number[]; houses: Record<number, number>
   isInJail: boolean; jailTurns: number; jailCards: number; consecutiveDoubles: number
-  isReady?: boolean; housesBoughtThisTurn: boolean; isBankrupt: boolean
+  isReady?: boolean; housesBoughtThisTurn: boolean; isBankrupt: boolean, pendingJail?: boolean
 }
 
 export type RoomState = {

@@ -21,10 +21,24 @@ onMounted(() => {
       wsUrl,
       (data) => {
         console.log('📥 [APP] Received:', data.type, data)
+
+        // 🔹 Обработка НОВОГО события: отложенный арест
+        if (data.type === 'JAIL_SENTENCED') {
+          // 🔹 Показываем уведомление, но НЕ перемещаем фишку ещё
+          store.logs.unshift(`⚖️ ${data.message}`)
+          // Опционально: можно добавить флаг для анимации "приговора"
+          return
+        }
+
+        // 🔹 Стандартная обработка событий через store
         store.applyEvent(data)
+
+        // 🔹 Обработка сессии
         if (data.type === 'MY_ID' && data.playerId && data.roomId) {
           setSession(data.playerId, data.roomId, data.name || playerName.value || undefined)
         }
+
+        // 🔹 Обработка ошибок сессии
         if (data.type === 'ERROR' && (data.message?.includes('not found') || data.message?.includes('Player not found'))) {
           clearSession()
           if (store.status === 'PLAYING') store.status = 'LOBBY'
@@ -52,12 +66,14 @@ const leaveGame = () => {
 
 <template>
   <div class="min-h-screen bg-gray-900 text-white relative">
+    <!-- 🔄 Экран переподключения -->
     <div v-if="isReconnecting && store.status === 'PLAYING'" class="fixed inset-0 z-[100] bg-gray-900/95 backdrop-blur-sm flex flex-col items-center justify-center gap-4">
       <div class="text-2xl font-bold animate-pulse">🔄 Переподключение...</div>
       <p class="text-gray-400 text-sm">Не закрывайте вкладку</p>
       <button @click="leaveGame" class="mt-4 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition text-sm">Вернуться в лобби</button>
     </div>
 
+    <!-- 📊 Отладочная панель -->
     <div class="fixed top-4 left-4 bg-gray-800/90 backdrop-blur text-white px-3 py-2 rounded-lg text-xs z-50 border border-gray-600 shadow-xl font-mono">
       🟢 WS: {{ isConnected ? 'connected' : 'disconnected' }}<br>
       🎮 Status: <span class="font-bold text-yellow-300">{{ store.status || 'undefined' }}</span><br>
@@ -65,8 +81,10 @@ const leaveGame = () => {
       🔑 Session: {{ myId ? '✅' : '❌' }}
     </div>
 
+    <!-- 🏁 Модалка конца игры -->
     <GameOverModal v-if="store.gameOver" @close="store.gameOver = false" />
 
+    <!-- 🎮 Основной контент -->
     <template v-if="store.status === 'LOBBY'">
       <Lobby />
     </template>
@@ -86,4 +104,6 @@ const leaveGame = () => {
   </div>
 </template>
 
-<style>#app { width: 100%; }</style>
+<style>
+#app { width: 100%; }
+</style>

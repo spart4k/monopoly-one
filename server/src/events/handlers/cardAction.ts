@@ -46,10 +46,11 @@ export function handleDrawCard(
       room.addLog(`💸 ${player.name} заплатил ${card.amount}₽ по карте`)
       break
     case 'go_to_jail':
-      player.pos = 10; player.isInJail = true; player.jailTurns = 0; player.consecutiveDoubles = 0
-      broadcast(roomViews, room.id, { type: 'GO_TO_JAIL', playerId })
-      room.finishTurn()
-      return { success: true, actionRequired: true }
+      // 🔹 ТОЖЕ отложенный переход (как с клетки)
+      player.pendingJail = true
+      room.addLog(`🃏 ${player.name} вытянул карту "Иди в тюрьму" (переместится после хода следующего)`)
+      // Не вызываем broadcast GO_TO_JAIL сразу — это сделает processPendingJail
+      break
     case 'get_jail_card':
       player.jailCards = (player.jailCards || 0) + 1
       room.addLog(`🎫 ${player.name} получил карту "Выход из тюрьмы"`)

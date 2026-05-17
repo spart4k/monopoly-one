@@ -138,3 +138,12 @@ export function sendEvent(payload: any) {
 export function isWsReady(): boolean {
   return ws?.readyState === 1
 }
+
+export type WsEvent =
+  | { type: 'SYNC_STATE'; payload: any }
+  | { type: 'ACTION_REQUIRED'; title: string; message: string; amount?: number; spaceId?: number }
+  | { type: 'GO_TO_JAIL'; playerId: string }
+  | { type: 'JAIL_SENTENCED'; playerId: string; message: string } // 🔹 Новое
+  | { type: 'ROOMS_LIST'; rooms: any[] }
+  | { type: 'MY_ID'; playerId: string; roomId: string }
+  | { type: 'ERROR'; message: string }
