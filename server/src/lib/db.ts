@@ -70,11 +70,34 @@ export async function logGameEvent(roomId: string, playerId: string, type: strin
   )
 }
 
+// server/src/lib/db.ts
+
 export async function saveGameEnd(roomId: string, winnerId: string | null, finalState: any) {
-  return query(
+  // 1. Завершаем игру
+  const gameRes = await query(
     `UPDATE games SET status = 'ENDED', ended_at = NOW(), winner_id = $2, final_state = $3, duration = NOW() - started_at WHERE room_id = $1 RETURNING id`,
     [roomId, winnerId, JSON.stringify(finalState)]
   )
+
+  // 2. 🔑 ОБНОВЛЯЕМ СТАТИСТИКУ ИГРОКОВ
+  if (finalState?.players) {
+    for (const p of finalState.players) {
+      const isWinner = p.id === winnerId
+
+      // Увеличиваем сыгранные матчи
+      await query(`UPDATE users SET games_played = games_played + 1 WHERE id = $1`, [p.id])
+
+      if (isWinner) {
+        // Победа: +1 win, +15 rating
+        await query(`UPDATE users SET wins = wins + 1, rating = rating + 15 WHERE id = $1`, [p.id])
+      } else {
+        // Поражение: +1 loss, -10 rating
+        await query(`UPDATE users SET losses = losses + 1, rating = GREATEST(rating - 10, 0) WHERE id = $1`, [p.id])
+      }
+    }
+  }
+
+  return gameRes.rows[0]
 }
 
 export { pool }

@@ -5,7 +5,6 @@ import { broadcast } from '../../../lib/ws-utils'
 import { getSpaceById } from '../../../shared/boardConfig'
 import {
   calculateRent,
-  processPayment,
   getNextPlayerIndex,
   calculatePassGoBonus
 } from '../../../lib/gameRules'
@@ -22,14 +21,13 @@ export function processCellEffects(
   const space = getSpaceById(spaceId)
   if (!player || !space) return false
 
-  // 🔹 Проход через СТАРТ (бонус +200₽)
+  // 🔹 Бонус за прохождение СТАРТ
   const passBonus = calculatePassGoBonus(player.pos, spaceId)
   if (passBonus > 0) {
     player.money += passBonus
     room.addLog(`💰 ${player.name} получил ${passBonus}₽ за прохождение СТАРТ`)
   }
 
-  // 🔹 Маршрутизация по типу клетки
   if (space.type === 'property' || space.type === 'railroad' || space.type === 'utility') {
     return handlePropertyCell(room, playerId, space, dice, roomViews)
   }
@@ -39,7 +37,7 @@ export function processCellEffects(
   }
   if (space.type === 'go_to_jail') return handleGoToJailCell(room, playerId, roomViews)
 
-  return false // Нет действий → ход завершится автоматически
+  return false
 }
 
 // 🔹 Обработка недвижимости / ЖД / коммуналок
@@ -50,11 +48,19 @@ function handlePropertyCell(
   dice: [number, number],
   roomViews: Map<string, RoomView>
 ): boolean {
-  // 🔹 Ищем владельца (не сам игрок, не банкрот)
+  const player = room.getPlayer(playerId)!
+
+  // 🔹 КРИТИЧНО: БЕЗОПАСНАЯ ПРОВЕРКА ВЛАДЕНИЯ (с приведением типов)
+  const isOwner = player.properties.some((prop: any) => Number(prop) === Number(space.id))
+  if (isOwner) {
+    // Игрок уже владеет улицей → НИЧЕГО НЕ ДЕЛАЕМ, ход перейдёт автоматически
+    return false
+  }
+
+  // 🔹 Ищем ДРУГОГО владельца
   const owner = room.state.players.find(p =>
-    p.properties?.includes(space.id) &&
     p.id !== playerId &&
-    !p.isBankrupt
+    p.properties?.some((prop: any) => Number(prop) === Number(space.id))
   )
 
   // 🔹 Если нет владельца → можно купить
@@ -77,37 +83,29 @@ function handlePropertyCell(
   }
 
   // 🔹 Если владелец — другой игрок → считаем аренду
-  if (owner.id !== playerId) {
-    // 🔹 Подсчёт количества владений для формул
-    const ownedUtils = owner.properties.filter((id: number) => [12, 28].includes(id)).length
-    const ownedRRs = owner.properties.filter((id: number) => [5, 15, 25, 35].includes(id)).length
-    const houses = owner.houses?.[space.id] || 0
-    const diceSum = dice[0] + dice[1]
+  const ownedUtils = owner.properties.filter((id: any) => [12, 28].includes(Number(id))).length
+  const ownedRRs = owner.properties.filter((id: any) => [5, 15, 25, 35].includes(Number(id))).length
+  const houses = owner.houses?.[space.id] || 0
+  const diceSum = dice[0] + dice[1]
 
-    // 🔹 Расчёт через gameRules.ts
-    const rent = calculateRent(space, houses, diceSum, ownedUtils, ownedRRs)
+  const rent = calculateRent(space, houses, diceSum, ownedUtils, ownedRRs)
 
-    // 🔹 КРИТИЧНО: НЕ СПИСЫВАЕМ! Только устанавливаем pending
-    room.state.pendingPayment = { amount: rent, creditorId: owner.id, type: 'rent' }
-    room.state.actionPending = 'INFO'
+  room.state.pendingPayment = { amount: rent, creditorId: owner.id, type: 'rent' }
+  room.state.actionPending = 'INFO'
 
-    const label = houses === 0 ? '(базовая)' : houses === 4 ? '(🏨 отель)' : `(🏠 ${houses} дома)`
-    room.addLog(`💸 ${room.getPlayer(playerId)?.name} должен заплатить ${rent}₽ аренды за ${space.name} ${label}`)
+  const label = houses === 0 ? '(базовая)' : houses === 4 ? '(🏨 отель)' : `(🏠 ${houses} дома)`
+  room.addLog(`💸 ${player.name} должен заплатить ${rent}₽ аренды за ${space.name} ${label}`)
 
-    broadcast(roomViews, room.id, {
-      type: 'ACTION_REQUIRED',
-      title: '💸 Аренда',
-      message: `Аренда ${rent}₽ ${label}`,
-      icon: '💸',
-      spaceId: space.id,
-      amount: rent,
-      isMandatory: true
-    })
-    return true // Требуется действие игрока
-  }
-
-  // 🔹 Игрок на своей клетке → ничего не делаем
-  return false
+  broadcast(roomViews, room.id, {
+    type: 'ACTION_REQUIRED',
+    title: '💸 Аренда',
+    message: `Аренда ${rent}₽ ${label}`,
+    icon: '💸',
+    spaceId: space.id,
+    amount: rent,
+    isMandatory: true
+  })
+  return true
 }
 
 // 🔹 Обработка налогов
@@ -124,24 +122,19 @@ function handleTaxCell(
 
   room.addLog(`📉 ${room.getPlayer(playerId)?.name} должен заплатить налог ${tax}₽`)
   broadcast(roomViews, room.id, {
-    type: 'ACTION_REQUIRED',
-    title: '📉 Налог',
-    message: `Налог ${tax}₽`,
-    icon: '📉',
-    amount: tax,
-    isMandatory: true
+    type: 'ACTION_REQUIRED', title: '📉 Налог', message: `Налог ${tax}₽`,
+    icon: '📉', amount: tax, isMandatory: true
   })
   return true
 }
 
-// 🔹 Обработка карт Шанс/Казна
+// 🔹 Обработка карт
 function handleCardCell(
   room: Room,
   playerId: string,
   cardType: 'chance' | 'community',
   roomViews: Map<string, RoomView>
 ): boolean {
-  // 🔹 handleDrawCard уже содержит логику вытягивания и эффектов
   const result = handleDrawCard(room, playerId, cardType, roomViews)
   return result?.actionRequired || false
 }
@@ -162,12 +155,10 @@ function handleGoToJailCell(
 
   room.addLog(`🚔 ${player.name} отправлен в тюрьму!`)
   broadcast(roomViews, room.id, { type: 'GO_TO_JAIL', playerId })
-
-  // 🔹 В тюрьму ход переходит сразу
   return false
 }
 
-// 🔹 Завершение хода (вызывается из rollDice.ts / buyProperty.ts)
+// 🔹 Завершение хода
 export function finalizeTurn(
   room: Room,
   playerId: string,
@@ -175,10 +166,8 @@ export function finalizeTurn(
   actionRequired: boolean,
   roomViews: Map<string, RoomView>
 ): void {
-  // 🔹 Если требуется действие → не завершаем ход
   if (actionRequired) return
 
-  // 🔹 Дубль → игрок ходит снова
   if (keepTurn) {
     room.state.actionPending = 'DOUBLE_TURN'
     room.addLog(`🎲 ${room.getPlayer(playerId)?.name} сохраняет ход (дубль)`)
@@ -186,7 +175,6 @@ export function finalizeTurn(
     return
   }
 
-  // 🔹 Обычный переход хода (с пропуском банкротов)
   const currentIdx = room.state.players.findIndex(p => p.id === playerId)
   const nextIdx = getNextPlayerIndex(room.state.players, currentIdx)
   room.state.currentTurn = room.state.players[nextIdx]?.id || room.state.currentTurn

@@ -6,6 +6,11 @@ import { getSpaceById } from '../../shared/boardConfig'
 export function handleBuyProperty(room: Room, playerId: string, spaceId: number, roomViews: Map<string, RoomView>) {
   const player = room.getPlayer(playerId)
   if (!player) return { error: 'Игрок не найден' }
+  const alreadyOwned = player.properties.some((prop: any) => Number(prop) === Number(spaceId))
+  if (alreadyOwned) {
+    return { error: 'Вы уже владеете этой улицей' }
+  }
+
   if (room.state.actionPending !== 'BUY') return { error: 'Ожидается действие покупки' }
   if (playerId !== room.state.currentTurn) return { error: 'Не ваш ход' }
 

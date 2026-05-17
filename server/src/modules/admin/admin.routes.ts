@@ -47,4 +47,20 @@ export function registerAdminRoutes(app: FastifyInstance, roomManager: any) {
     await query('UPDATE users SET is_banned = true WHERE id = $1', [(req.params as any).userId])
     return reply.send({ success: true })
   })
+
+  app.get('/admin/stats', { preHandler: authenticate }, async (req, reply) => {
+    const res = await query(`
+      SELECT 
+        id, nickname, role, 
+        rating, wins, losses, games_played,
+        CASE 
+          WHEN (wins + losses) > 0 THEN ROUND((wins::numeric / (wins + losses) * 100), 1) 
+          ELSE 0 
+        END as win_rate_percent
+      FROM users 
+      ORDER BY rating DESC 
+      LIMIT 100
+    `)
+    return reply.send(res.rows)
+  })
 }
