@@ -1,3 +1,4 @@
+<!-- client/src/components/MonopolyBoard.vue -->
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useGameStore } from '../stores/game'
@@ -86,7 +87,15 @@ const rollDice = () => {
   if (!myId.value || !isMyTurn.value || store.status !== 'PLAYING') return
   if (store.pendingAction && store.pendingAction !== 'DOUBLE_TURN') return
   if (animating.value[myId.value]) return
-  sendEvent({ type: 'ROLL_DICE', playerId: myId.value, targetSpaceId: debugTarget.value || undefined })
+
+  const isDebug = debugTarget.value !== null && debugTarget.value !== undefined
+  sendEvent({
+    type: 'ROLL_DICE',
+    playerId: myId.value,
+    targetSpaceId: isDebug ? debugTarget.value : undefined,
+    debugTeleport: isDebug
+  })
+  if (isDebug) debugTarget.value = null
 }
 
 const handleBuyProperty = () => {
@@ -248,7 +257,8 @@ const getPlayerName = (id: string) => store.players.find(p => p.id === id)?.name
               <div v-for="(d, i) in store.lastDice" :key="i" class="w-12 h-12 md:w-14 md:h-14 bg-gray-100 rounded-xl flex items-center justify-center font-bold text-2xl md:text-3xl text-gray-800 shadow-inner">{{ d }}</div>
             </div>
 
-            <GameControls v-if="!store.gameOver" @open-details="openDetailsModal" />
+            <!-- 🔹 Передаём debugTarget в GameControls -->
+            <GameControls :debug-target="debugTarget" v-if="!store.gameOver" @open-details="openDetailsModal" />
 
             <div ref="chatContainer" class="w-full max-w-md h-48 md:h-96 overflow-y-auto bg-white rounded-lg p-2 md:p-3 text-[10px] md:text-xs font-mono space-y-1 border border-gray-200 shadow-inner custom-scroll">
               <div v-for="(log, i) in store.logs" :key="i" class="text-gray-600 border-b border-gray-100 pb-1 last:border-0">{{ log }}</div>
@@ -259,7 +269,7 @@ const getPlayerName = (id: string) => store.players.find(p => p.id === id)?.name
               <span v-if="store.gameOver" class="ml-2 px-2 py-0.5 bg-red-100 text-red-600 rounded-full text-xs font-bold">ИГРА ОКОНЧЕНА</span>
             </p>
 
-            <div v-if="true" class="w-full max-w-xs mt-1">
+            <div class="w-full max-w-xs mt-1">
               <label class="text-[9px] md:text-[10px] font-semibold text-gray-400 mb-0.5 block text-center">🧪 Все ячейки (0-39):</label>
               <select v-model="debugTarget" class="w-full bg-gray-100 border border-gray-300 rounded-lg px-2 py-1 text-[10px] md:text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 max-h-48 overflow-y-auto">
                 <option :value="null">🎲 Случайный бросок</option>

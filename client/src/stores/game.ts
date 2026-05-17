@@ -75,7 +75,14 @@ export const useGameStore = defineStore('game', () => {
           }
           break
         case 'ACTION_REQUIRED':
-          pendingAction.value = 'INFO'; pendingInfo.value = event; selectedSpaceId.value = event.spaceId ?? null; break
+          pendingAction.value = 'INFO'
+          pendingInfo.value = event
+          selectedSpaceId.value = event.spaceId ?? null
+          // 🔹 Если это карта/тюрьма, сбрасываем ID улицы, чтобы модалка не показывала чужую
+          if (event.type === 'CARD' || event.title === '🚔 Тюрьма' || event.title?.includes('Шанс') || event.title?.includes('Казна')) {
+            selectedSpaceId.value = null
+          }
+          break
         case 'DOUBLE_ROLLED': pendingAction.value = 'DOUBLE_TURN'; break
         case 'GAME_OVER':
           gameOver.value = true

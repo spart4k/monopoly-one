@@ -10,6 +10,11 @@ const store = useGameStore()
 const { myId } = useSession()
 const emit = defineEmits<{ openDetails: [] }>()
 
+// 🔹 Проп для получения выбранной отладочной ячейки
+const props = defineProps<{
+  debugTarget?: number | null
+}>()
+
 const currentPlayer = computed(() => store.players.find(p => p.id === store.currentTurn))
 const isMyTurn = computed(() => !!myId.value && store.currentTurn === myId.value)
 const isInJail = computed(() => currentPlayer.value?.isInJail || false)
@@ -69,7 +74,19 @@ const mainButtonText = computed(() => {
   return `⏳ Ждите хода: ${currentPlayer.value?.name || '...'}`
 })
 
-const rollDice = () => { if (!myId.value || !isMyTurn.value || isMyBankrupt.value) return; sendEvent({ type: 'ROLL_DICE', playerId: myId.value }) }
+const rollDice = () => {
+  if (!myId.value || !isMyTurn.value || isMyBankrupt.value) return
+
+  // 🔹 АВТО-ТЕЛЕПОРТ: если ячейка выбрана → флаг true
+  const isDebug = props.debugTarget !== null && props.debugTarget !== undefined
+
+  sendEvent({
+    type: 'ROLL_DICE',
+    playerId: myId.value,
+    targetSpaceId: isDebug ? props.debugTarget : undefined,
+    debugTeleport: isDebug
+  })
+}
 
 const handleMainAction = () => {
   if (isMyBankrupt.value) return

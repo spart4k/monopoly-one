@@ -4,24 +4,11 @@ import type { RoomView } from '../../../rooms/RoomManager'
 import { broadcast, buildSyncPayload } from '../../../lib/ws-utils'
 import { getSpaceById } from '../../../shared/boardConfig'
 
-// 🔹 Импорт вынесенных хелперов
-import { processDoublesLogic, sendToJail } from './doubles'
-import { handleJailRoll } from './jail'
+// 🔹 Импорт из СОСЕДНИХ файлов в той же папке (./file, не ../../)
 import { processCellEffects, finalizeTurn } from './cell'
+import { processDoublesLogic, sendToJail } from './doubles'  // 🔹 Создадим этот файл ниже
+import { handleJailRoll } from './jail'
 
-/**
- * 🎲 Основной обработчик броска костей
- *
- * Поток:
- * 1. Валидация хода
- * 2. Если в тюрьме → handleJailRoll
- * 3. Бросок костей
- * 4. 🔑 Проверка дублей/тюрьмы (ДО движения!)
- * 5. Вычисление и применение позиции
- * 6. Бонус за СТАРТ
- * 7. Обработка ячейки
- * 8. Финализация хода
- */
 export function handleRollDice(
   room: Room,
   playerId: string,
@@ -29,87 +16,81 @@ export function handleRollDice(
   targetSpaceId?: number
 ): { success: boolean; actionRequired?: boolean } {
   const player = room.getPlayer(playerId)
-  if (!player) return { success: false }
+  if (!player) return { success: false, error: 'Игрок не найден' }
 
   // 🔒 Валидация
-  if (room.state.status !== 'PLAYING') {
-    return { success: false, error: '🚫 Игра не активна' }
-  }
-  if (room.state.currentTurn !== playerId) {
-    return { success: false, error: '🚫 Не ваш ход' }
-  }
+  if (room.state.status !== 'PLAYING') return { success: false, error: '🚫 Игра не активна' }
+  if (room.state.currentTurn !== playerId) return { success: false, error: '🚫 Не ваш ход' }
   if (room.state.actionPending !== 'NONE' && room.state.actionPending !== 'DOUBLE_TURN') {
     return { success: false, error: '🚫 Сначала завершите действие' }
   }
 
-  // 🚔 Если игрок в тюрьме — специальная логика
+  // 🚔 Если в тюрьме — отдельная логика
   if (player.isInJail) {
     return handleJailRoll(room, playerId, roomViews)
   }
 
-  // 🎲 Бросок костей
-  const dice: [number, number] = [
-    Math.ceil(Math.random() * 6),
-    Math.ceil(Math.random() * 6)
-  ]
-  const isDouble = dice[0] === dice[1]
-  const oldPos = player.pos
+  // 🔹 === ОТЛАДКА: "заряженные" кубики ===
+  const isDev = process.env.NODE_ENV === 'development' || !process.env.NODE_ENV
+  let d1: number, d2: number, total: number, isDouble: boolean
 
-  // 🔑 КРИТИЧНО: сначала проверяем дубли/тюрьму ДО любого движения
-  const doubleResult = processDoublesLogic(room, playerId, isDouble, roomViews)
-  if (doubleResult.shouldStop) {
-    // Игрок ушёл в тюрьму — рассылаем и выходим
-    broadcast(roomViews, room.id, {
-      type: 'SYNC_STATE',
-      payload: buildSyncPayload(room.state)
-    })
-    return { success: true }
-  }
-
-  // 📍 Вычисляем новую позицию
-  let finalPos = oldPos
-  if (targetSpaceId !== undefined) {
-    // Тестовый бросок: идём точно в цель
-    let steps = (targetSpaceId - oldPos + 40) % 40
-    if (steps === 0) steps = 40
-    steps = Math.max(2, Math.min(12, steps))
-    dice[0] = Math.floor(steps / 2)
-    dice[1] = steps - dice[0]
-    finalPos = targetSpaceId
+  if (isDev && targetSpaceId !== undefined && targetSpaceId >= 0 && targetSpaceId <= 39) {
+    const steps = (targetSpaceId - player.pos + 40) % 40
+    if (steps >= 2 && steps <= 12) {
+      d1 = Math.min(6, steps - 1)
+      d2 = steps - d1
+      total = steps
+      isDouble = d1 === d2
+      console.log(`🎯 [DEBUG] Forced roll: ${d1}+${d2}=${total} → ${targetSpaceId}`)
+    } else {
+      d1 = Math.floor(Math.random() * 6) + 1
+      d2 = Math.floor(Math.random() * 6) + 1
+      total = d1 + d2
+      isDouble = d1 === d2
+      console.log(`⚠️ [DEBUG] Target ${targetSpaceId} unreachable → random`)
+    }
   } else {
-    finalPos = (oldPos + dice[0] + dice[1]) % 40
+    d1 = Math.floor(Math.random() * 6) + 1
+    d2 = Math.floor(Math.random() * 6) + 1
+    total = d1 + d2
+    isDouble = d1 === d2
   }
 
-  // 🔄 Применяем движение
-  player.pos = finalPos
-  room.state.lastDice = dice
-  room.state.lastRollWasDouble = isDouble
+  room.state.lastDice = [d1, d2]
 
-  room.addLog(`🎲 ${player.name}: ${dice[0]}+${dice[1]}${isDouble ? ' (ДУБЛЬ!)' : ''} → ${finalPos}`)
-  broadcast(roomViews, room.id, {
-    type: 'PLAYER_MOVED',
-    playerId,
-    from: oldPos,
-    to: finalPos,
-    dice
-  })
+  // 🔹 3 дубля → тюрьма
+  if (isDouble) {
+    player.consecutiveDoubles++
+    if (player.consecutiveDoubles >= 3) {
+      sendToJail(room, playerId, roomViews)
+      room.finishTurn()
+      room.broadcastState()
+      return { success: true }
+    }
+  } else {
+    player.consecutiveDoubles = 0
+  }
 
-  // 💰 Проход через СТАРТ
-  if (finalPos < oldPos || finalPos === 0) {
+  // 🔹 Движение
+  const oldPos = player.pos
+  player.pos = (player.pos + total) % 40
+  room.addLog(`🎲 ${player.name}: ${d1}+${d2} → ${player.pos}${isDouble ? ' (ДУБЛЬ!)' : ''}`)
+  broadcast(roomViews, room.id, { type: 'PLAYER_MOVED', playerId, from: oldPos, to: player.pos, dice: [d1, d2] })
+
+  // 💰 Проход СТАРТ
+  if (player.pos < oldPos || (oldPos > 30 && player.pos <= 10)) {
     player.money += 200
     room.addLog(`💰 ${player.name} получил 200₽ за СТАРТ`)
   }
 
-  // 📍 Обработка ячейки
-  const actionRequired = processCellEffects(room, playerId, finalPos, dice, roomViews)
+  // 🔹 Эффекты клетки
+  const actionRequired = processCellEffects(room, playerId, player.pos, room.state.lastDice, roomViews)
 
-  // 🔄 Завершение хода
-  finalizeTurn(room, playerId, doubleResult.keepTurn, actionRequired, roomViews)
+  // 🔹 Завершение хода
+  if (!actionRequired) {
+    finalizeTurn(room, playerId, isDouble, false, roomViews)
+  }
 
-  broadcast(roomViews, room.id, {
-    type: 'SYNC_STATE',
-    payload: buildSyncPayload(room.state)
-  })
-
+  room.broadcastState()
   return { success: true, actionRequired }
 }
