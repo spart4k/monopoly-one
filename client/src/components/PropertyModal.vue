@@ -187,84 +187,87 @@ const hasFullUtilitySet = computed(() => {
               </div>
 
               <!-- 🔑 ТАБЛИЦА АРЕНДЫ (исправленная) -->
-              <div class="border-t pt-3">
-                <h4 class="font-semibold mb-2">Аренда:</h4>
+              <div class="border-t pt-3 mt-3">
+                <h4 class="font-semibold mb-2 text-gray-800 text-sm">💰 Аренда:</h4>
 
                 <!-- 🚂 ЖД Вокзалы -->
-                <div v-if="space.type === 'railroad'" class="text-sm space-y-1">
+                <div v-if="space.type === 'railroad'" class="text-sm space-y-1 bg-gray-50 rounded-lg p-2">
                   <div class="flex justify-between"><span>1 станция</span><span class="font-mono">25₽</span></div>
                   <div class="flex justify-between"><span>2 станции</span><span class="font-mono">50₽</span></div>
                   <div class="flex justify-between"><span>3 станции</span><span class="font-mono">100₽</span></div>
                   <div class="flex justify-between"><span>4 станции</span><span class="font-mono">200₽</span></div>
                 </div>
 
-                <!-- ⚡ Коммунальные предприятия (исправлено) -->
+                <!-- ⚡ Коммунальные предприятия (ИСПРАВЛЕНО) -->
                 <div v-else-if="space.type === 'utility'" class="text-sm space-y-2">
-                  <div class="border rounded-lg overflow-hidden" :class="hasBothUtilities ? 'border-green-400' : 'border-gray-200'">
-                    <!-- 1 предприятие -->
-                    <div class="flex justify-between p-2 border-b" :class="!hasBothUtilities ? 'bg-green-50 font-semibold text-gray-800' : 'bg-gray-50'">
+                  <div class="border rounded-lg overflow-hidden" :class="hasBothUtilities ? 'border-green-500 shadow-sm' : 'border-gray-200'">
+                    <div class="flex justify-between p-2" :class="!hasBothUtilities ? 'bg-green-50 font-semibold text-gray-800' : 'bg-gray-50'">
                       <span>📏 1 предприятие:</span>
-                      <span class="font-mono">Сумма кубиков × 4</span>
+                      <span class="font-mono text-blue-600">Сумма кубиков × 4</span>
                     </div>
-                    <!-- 2 предприятия -->
-                    <div class="flex justify-between p-2" :class="hasBothUtilities ? 'bg-green-50 font-semibold text-gray-800' : 'bg-gray-50'">
+                    <div class="flex justify-between p-2 border-t" :class="hasBothUtilities ? 'bg-green-100 font-semibold text-green-800' : 'bg-gray-50'">
                       <span>📏 2 предприятия:</span>
-                      <span class="font-mono">Сумма кубиков × 10</span>
+                      <span class="font-mono text-blue-600">Сумма кубиков × 10</span>
                     </div>
                   </div>
 
-                  <!-- 🔑 Индикатор монополии -->
-                  <div v-if="hasBothUtilities" class="text-xs text-center text-green-600 font-medium flex items-center justify-center gap-1">
-                    ✅ Полный комплект: аренда ×10
+                  <div v-if="hasBothUtilities" class="flex items-center justify-center gap-1 text-xs text-green-700 bg-green-50 py-1.5 px-2 rounded border border-green-300">
+                    <span>✅</span> Полный комплект: аренда ×10
                   </div>
-                  <p class="text-xs text-gray-500">
-                    Текущая к оплате: <span class="font-semibold text-gray-700">{{ requiredAmount || '...' }}₽</span>
+
+                  <p class="text-xs text-gray-500 text-center mt-1">
+                    💡 Аренда зависит от броска кубиков. К оплате сейчас: <span class="font-bold text-gray-800">{{ requiredAmount || '...' }}₽</span>
                   </p>
                 </div>
 
                 <!-- 🏠 Обычные улицы -->
-                <template v-else>
-                  <table class="w-full text-sm">
-                    <tr class="border-b" :class="{ 'bg-green-50 font-semibold text-green-700': currentHouseCount === 0 }">
-                      <td class="py-1"><span v-if="currentHouseCount === 0">✅ </span>Базовая</td>
-                      <td class="text-right font-mono">{{ space.baseRent }}₽</td>
+                <template v-else-if="space.type === 'property'">
+                  <table class="w-full text-sm bg-gray-50 rounded-lg overflow-hidden">
+                    <tr class="border-b" :class="{ 'bg-blue-50 font-semibold text-blue-700': currentHouseCount === 0 }">
+                      <td class="py-2 pl-3"><span v-if="currentHouseCount === 0">✅ </span>Базовая</td>
+                      <td class="text-right font-mono pr-3">{{ space.baseRent }}₽</td>
                     </tr>
-                    <tr v-if="space.rentWithHouse" v-for="(rent, i) in space.rentWithHouse" :key="i" class="border-b" :class="{ 'bg-green-50 font-semibold text-green-700': currentHouseCount === i + 1 }">
-                      <td class="py-1"><span v-if="currentHouseCount === i + 1">✅ </span>{{ houseLabels[i] }}</td>
-                      <td class="text-right font-mono">{{ rent }}₽</td>
+                    <tr v-if="space.rentWithHouse" v-for="(rent, i) in space.rentWithHouse" :key="i" class="border-b" :class="{ 'bg-blue-50 font-semibold text-blue-700': currentHouseCount === i + 1 }">
+                      <td class="py-2 pl-3"><span v-if="currentHouseCount === i + 1">✅ </span>{{ ['1 дом','2 дома','3 дома','4 дома'][i] }}</td>
+                      <td class="text-right font-mono pr-3">{{ rent }}₽</td>
                     </tr>
-                    <tr v-if="space.rentWithHotel" class="font-bold text-blue-600" :class="{ 'bg-blue-50 font-semibold text-blue-700': currentHouseCount === 5 }">
-                      <td class="py-2"><span v-if="currentHouseCount === 5">✅ </span>С отелем</td>
-                      <td class="text-right font-mono">{{ space.rentWithHotel }}₽</td>
+                    <tr v-if="space.rentWithHotel" class="border-b-2" :class="{ 'bg-purple-50 font-bold text-purple-700': currentHouseCount === 5 }">
+                      <td class="py-2 pl-3"><span v-if="currentHouseCount === 5">✅ </span>🏨 Отель</td>
+                      <td class="text-right font-mono pr-3">{{ space.rentWithHotel }}₽</td>
                     </tr>
                   </table>
                 </template>
               </div>
 
               <!-- 🔑 Управление (только для property, НЕ для utility/railroad) -->
-              <div v-if="isMyProperty && space.type === 'property'"
-                   :key="actionKey"
-                   class="pt-2 border-t space-y-2">
-                <div class="flex justify-between text-sm text-gray-500"><span>Стоимость дома</span><span class="font-mono">{{ space.houseCost }}₽</span></div>
-                <div class="flex gap-2">
-                  <button @click="emit('buyHouse')" :disabled="!canBuyHouse" class="flex-1 px-2 py-1.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white text-xs rounded-lg transition relative group">
+              <!-- 🔹 Найди старый div с кнопками и замени на этот -->
+              <div v-if="isMyProperty && space.type === 'property'" :key="actionKey" class="pt-3 border-t border-gray-200 mt-3 space-y-2">
+                <div class="flex justify-between text-xs text-gray-500 px-1">
+                  <span>Стоимость дома</span>
+                  <span class="font-mono font-bold">{{ space.houseCost }}₽</span>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2">
+                  <button @click="emit('buyHouse')" :disabled="!canBuyHouse"
+                          class="px-3 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-xs rounded-lg transition font-medium">
                     🏠 Купить
-                    <span v-if="!canBuyHouse && store.players.find(p => p.id === myId)?.housesBoughtThisTurn"
-                          class="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 bg-gray-900 text-white text-[10px] rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition pointer-events-none">
-                      ⏳ 1 дом за ход
-                    </span>
                   </button>
-                  <button @click="emit('sellHouse')" :disabled="!canSellHouse" class="flex-1 px-2 py-1.5 bg-red-600 hover:bg-red-700 disabled:bg-gray-400 text-white text-xs rounded-lg transition">💰 Продать</button>
+                  <button @click="emit('sellHouse')" :disabled="!canSellHouse"
+                          class="px-3 py-2 bg-red-500 hover:bg-red-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-xs rounded-lg transition font-medium">
+                    💰 Продать
+                  </button>
                 </div>
-                <div class="flex gap-2 pt-1">
-                  <button v-if="!isMortgaged && canMortgage" @click="emit('mortgage')" class="flex-1 px-2 py-1.5 bg-gray-600 hover:bg-gray-700 text-white text-xs rounded-lg transition">🔒 Заложить за {{ mortgageValue }}₽</button>
-                  <button v-else-if="isMortgaged" @click="emit('unmortgage')" class="flex-1 px-2 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs rounded-lg transition">🔓 Выкупить за {{ unmortgageCost }}₽</button>
-                </div>
-                <!-- Подсказки -->
-                <div v-if="!canMortgage" class="text-[10px] text-gray-500 text-center">
-                  <span v-if="(space && (store.players.find(p => p.id === myId)?.houses?.[space.id] || 0) > 0)">🏠 Сначала продайте дома на этой улице</span>
-                  <span v-else-if="hasHousesInColorGroup">🏠 Сначала продайте дома на других улицах этого цвета</span>
-                  <span v-else-if="isMortgaged">🔒 Улица уже заложена</span>
+
+                <!-- Залог/Выкуп -->
+                <div class="grid grid-cols-2 gap-2 pt-1">
+                  <button v-if="!isMortgaged && canMortgage" @click="emit('mortgage')"
+                          class="px-2 py-1.5 bg-gray-600 hover:bg-gray-700 text-white text-xs rounded-lg transition">
+                    🔒 Заложить за {{ mortgageValue }}₽
+                  </button>
+                  <button v-else-if="isMortgaged" @click="emit('unmortgage')"
+                          class="px-2 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs rounded-lg transition">
+                    🔓 Выкупить за {{ unmortgageCost }}₽
+                  </button>
                 </div>
               </div>
             </div>

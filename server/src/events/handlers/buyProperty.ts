@@ -3,6 +3,7 @@ import type { Room } from '../../rooms/Room'
 import type { RoomView } from '../../rooms/RoomManager'
 import { broadcast, buildSyncPayload } from '../../lib/ws-utils'
 import { getSpaceById } from '../../shared/boardConfig'
+import { processCellEffects } from './rollDice/cell'
 
 // 🔹 Вспомогательная функция: корректно завершает действие, сохраняя ход при дубле
 function completeActionTurn(room: Room, playerId: string, roomViews: Map<string, RoomView>) {
@@ -72,39 +73,53 @@ export function handlePassAction(room: Room, playerId: string, roomViews: Map<st
   }
 
   // 🔹 2. Карты Шанс/Казна + Тюрьма
+  // 🔹 2. Карты Шанс/Казна + Тюрьма
   if (room.state.actionPending === 'CARD') {
     const card = room.state.pendingCard
+    const player = room.getPlayer(playerId)!
+    let movedToNewCell = false
+
     if (card) {
       switch (card.action) {
         case 'go_to_jail':
           player.pos = 10; player.isInJail = true; player.jailTurns = 0; player.consecutiveDoubles = 0
           room.addLog(`🚔 ${player.name} перемещён в тюрьму`)
           broadcast(roomViews, room.id, { type: 'GO_TO_JAIL', playerId })
-          break
+          // По ТЗ: ход ВСЕГДА переходит после карты тюрьмы
+          room.state.pendingCard = null; room.state.actionPending = 'NONE'; room.state.selectedSpaceId = null
+          room.finishTurn()
+          broadcast(roomViews, room.id, { type: 'SYNC_STATE', payload: buildSyncPayload(room.state) })
+          return { success: true }
         case 'move':
           if (player.pos > (card.targetSpaceId || 0)) { player.money += 200; room.addLog(`💰 ${player.name} получил 200₽ за СТАРТ`) }
           player.pos = card.targetSpaceId || 0
+          movedToNewCell = true
           break
         case 'move_back':
           player.pos = (player.pos - (card.steps || 0) + 40) % 40
+          movedToNewCell = true
           room.addLog(`🔙 ${player.name} вернулся на ${card.steps} клетки назад`)
           break
-        case 'receive':
-          player.money += card.amount || 0; room.addLog(`🎁 ${player.name} получил ${card.amount}₽`)
-          break
-        case 'pay':
-          player.money -= card.amount || 0; room.addLog(`💸 ${player.name} заплатил ${card.amount}₽`)
-          break
-        case 'get_jail_card':
-          player.jailCards = (player.jailCards || 0) + 1; room.addLog(`🎫 ${player.name} получил карту "Выход из тюрьмы"`)
-          break
+        case 'receive': player.money += card.amount || 0; room.addLog(`🎁 ${player.name} получил ${card.amount}₽`); break
+        case 'pay': player.money -= card.amount || 0; room.addLog(`💸 ${player.name} заплатил ${card.amount}₽`); break
+        case 'get_jail_card': player.jailCards = (player.jailCards || 0) + 1; room.addLog(`🎫 ${player.name} получил карту`); break
       }
     }
 
-    // 🔹 КРИТИЧНО: После карты ход ВСЕГДА переходит (даже при дубле)
     room.state.pendingCard = null
-    room.state.actionPending = 'NONE'
     room.state.selectedSpaceId = null
+
+    // 🔹 КРИТИЧНО: Если карта переместила фишку — ПРОВЕРЯЕМ новую клетку!
+    if (movedToNewCell) {
+      const dice = room.state.lastDice || [1, 1]
+      const actionRequired = processCellEffects(room, playerId, player.pos, dice, roomViews)
+      if (actionRequired) {
+        return { success: true } // Ждём действия на новой клетке (налог, аренда, другая карта)
+      }
+    }
+
+    // Если новая клетка свободная или движение не было — завершаем ход
+    room.state.actionPending = 'NONE'
     room.finishTurn()
     broadcast(roomViews, room.id, { type: 'SYNC_STATE', payload: buildSyncPayload(room.state) })
     return { success: true }
