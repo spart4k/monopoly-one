@@ -14,6 +14,12 @@ export default defineConfig({
       '@': fileURLToPath(new URL('./src', import.meta.url)) // 🔹 Алиас для импортов
     }
   },
+  base: '/admin/',
+
+  build: {
+    outDir: 'dist',
+    assetsDir: 'assets',
+  },
   server: {
     port: 5174, // 🔹 Чтобы не конфликтовал с основным клиентом (5173)
     proxy: {
