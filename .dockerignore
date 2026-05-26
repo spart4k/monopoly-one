@@ -1,0 +1,25 @@
+# 🔹 Игнорируем зависимости (они установятся внутри контейнера)
+node_modules
+pnpm-lock.yaml
+
+# 🔹 Игнорируем сборку/кэш (не нужны в продакшене)
+dist
+.output
+.cache
+.nuxt
+*.log
+
+# 🔹 Игнорируем локальные конфиги и секреты
+.env
+.env.local
+*.env
+.vscode
+.idea
+*.md
+.git
+.gitignore
+
+# 🔹 Игнорируем клиентские папки (они маунтятся через volumes в docker-compose)
+../client
+../admin
+../landing
