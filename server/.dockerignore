@@ -18,8 +18,3 @@ dist
 *.md
 .git
 .gitignore
-
-# 🔹 Игнорируем клиентские папки (они маунтятся через volumes в docker-compose)
-../client
-../admin
-../landing
