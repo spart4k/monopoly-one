@@ -1,20 +1,14 @@
+# server/Dockerfile
 FROM node:20-alpine
-
 WORKDIR /app
 
-# Устанавливаем pnpm глобально
-RUN npm install -g pnpm
+# Копируем package.json и lock, устанавливаем зависимости
+COPY package.json pnpm-lock.yaml* ./
+RUN npm i -g pnpm && pnpm install --prod
 
-# Копируем манифесты ПЕРЕД кодом для кэширования слоя install
-COPY package.json pnpm-lock.yaml ./
-
-# Устанавливаем зависимости ВНУТРИ образа
-RUN pnpm install --frozen-lockfile
-
-# Копируем исходный код
+# Копируем исходники
 COPY . .
 
-EXPOSE 3000 9229
-ENV NODE_OPTIONS="--inspect=0.0.0.0:9229"
-
-CMD ["pnpm", "dev"]
+EXPOSE 3000
+# Замени на свою команду запуска, если используешь компиляцию или tsx
+CMD ["pnpm", "start"] 
