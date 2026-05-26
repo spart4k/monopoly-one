@@ -47,7 +47,7 @@ export default defineNuxtConfig({
       failOnError: false, // 🔹 Не прерывать сборку из-за 404
       // Но лучше явно игнорировать, как выше
     }
-  }
+  },
 
 
   // 🔹 Runtime Config (ссылки на игру)
