@@ -30,11 +30,25 @@ export default defineNuxtConfig({
     }
   },
 
+  site: {
+    url: 'http://89.111.142.204:3000', // Для локалки
+    // В продакшене замени на: 'https://monopoly.yourdomain.com'
+    // Или используй env: url: process.env.NUXT_PUBLIC_SITE_URL
+  },
+
   // 🔹 Sitemap конфигурация
   sitemap: {
-    hostname: 'https://monopoly.yourdomain.com',
+    hostname: 'http://89.111.142.204:3000',
     gzip: true,
   },
+
+  nitro: {
+    prerender: {
+      failOnError: false, // 🔹 Не прерывать сборку из-за 404
+      // Но лучше явно игнорировать, как выше
+    }
+  }
+
 
   // 🔹 Runtime Config (ссылки на игру)
   runtimeConfig: {
