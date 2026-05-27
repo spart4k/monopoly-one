@@ -148,7 +148,7 @@ fastify.register(async (server) => {
         // =================================================================
         // 🔍 ТЕПЕРЬ ПРОВЕРЯЕМ КОМНАТУ (только для игровых событий)
         // =================================================================
-
+        console.log(`🔍 [DEBUG] Checking room for event: ${type}`)
         let room = roomManager.getRoom(eventRoomId)
         if (!room && playerId) {
           room = Array.from(roomManager.activeRooms.values()).find(r => r.getPlayer(playerId))
