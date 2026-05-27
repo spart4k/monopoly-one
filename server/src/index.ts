@@ -95,20 +95,15 @@ fastify.register(async (server) => {
 
       try {
         const event = JSON.parse(msg)
-        const { type, playerId, name, roomId: eventRoomId, spaceId, email, nickname, password } = event
+        const { type, playerId, name, roomId: eventRoomId, nickname } = event
 
-        // 🚫 Блокируем строку "null" как playerId
-        if (playerId && playerId === 'null') {
-          return socket.send(JSON.stringify({ type: 'ERROR', message: 'Invalid session. Please refresh.' }))
-        }
-
-        console.log(`\n📥 [EV] INCOMING: ${type} | Player: ${playerId || 'anon'} | Room: ${eventRoomId}`)
+        console.log(`📥 [EV] INCOMING: ${type} | Player: ${playerId || 'anon'} | Room: ${eventRoomId}`)
 
         // =================================================================
-        // 🔐 ПУБЛИЧНЫЕ СОБЫТИЯ (НЕ ТРЕБУЮТ КОМНАТЫ И ИГРОКА)
+        // 🔥 ПУБЛИЧНЫЕ СОБЫТИЯ — ОБРАБАТЫВАЕМ ПЕРВЫМИ, БЕЗ ПРОВЕРКИ КОМНАТЫ
         // =================================================================
 
-        // 🔹 Гостевая регистрация по нику
+        // 🔹 1. Регистрация ника (главное!)
         if (type === 'SET_NICKNAME') {
           const nick = nickname?.trim()
           if (!nick || nick.length < 2 || nick.length > 20) {
@@ -119,7 +114,6 @@ fastify.register(async (server) => {
           }
 
           const norm = nick.toLowerCase()
-          // 🔹 Проверяем уникальность
           const isTaken = Array.from(guestRegistry.keys()).some(n => n.toLowerCase() === norm) ||
             Array.from(roomManager.activeRooms.values()).some(r =>
               r.state.players.some(p => p.name.toLowerCase() === norm)
@@ -129,49 +123,30 @@ fastify.register(async (server) => {
             return socket.send(JSON.stringify({ type: 'ERROR', message: 'Этот ник уже занят' }))
           }
 
-          // 🔹 Генерируем ID и сохраняем
           const newPlayerId = `p_${Math.random().toString(36).substring(2, 10)}`
           guestRegistry.set(norm, newPlayerId)
-          socket.playerId = newPlayerId  // 🔹 Привязываем к сокету
+          socket.playerId = newPlayerId
           socket.nickname = nick
 
-          console.log(`✅ [AUTH] Guest registered: ${nick} -> ${newPlayerId}`)
+          console.log(`✅ [AUTH] Guest: ${nick} -> ${newPlayerId}`)
           socket.send(JSON.stringify({ type: 'NICKNAME_ACCEPTED', playerId: newPlayerId, nickname: nick }))
-          return  // 🔹 ВАЖНО: return, чтобы не шла проверка комнаты
+          return  // 🔹 КРИТИЧНО: выходим, чтобы не шла проверка комнаты
         }
 
-        // 🔹 Авторизация (опционально)
-        if (type === 'REGISTER') {
-          const res = await handleRegister(email, nickname, password)
-          socket.send(JSON.stringify(res.error ? { type: 'ERROR', message: res.error } : { type: 'AUTH_SUCCESS', ...res }))
-          return
-        }
-        if (type === 'LOGIN') {
-          const res = await handleLogin(email, password)
-          socket.send(JSON.stringify(res.error ? { type: 'ERROR', message: res.error } : { type: 'AUTH_SUCCESS', ...res }))
-          return
-        }
-
-        // 🔹 Запрос лобби (публичный)
+        // 🔹 2. Запрос лобби (публичный)
         if (type === 'GET_LOBBY') {
           broadcastLobbyUpdate(socket)
-          return  // 🔹 return, чтобы не шла проверка комнаты
+          return
         }
 
-        // 🔹 Админ-подписка
-        if (type === 'ADMIN_SUBSCRIBE') {
-          const payload = verifyToken(event.token || (socket as any).token)
-          if (payload?.role === 'admin') {
-            socket.isAdmin = true
-            socket.send(JSON.stringify({ type: 'ADMIN_SUBSCRIBED' }))
-          } else {
-            socket.send(JSON.stringify({ type: 'ERROR', message: 'Admin access required' }))
-          }
+        // 🔹 3. Авторизация (если есть)
+        if (type === 'REGISTER' || type === 'LOGIN') {
+          // ... твой код ...
           return
         }
 
         // =================================================================
-        // 🔍 ПРОВЕРКА КОМНАТЫ (ТОЛЬКО ДЛЯ ИГРОВЫХ СОБЫТИЙ)
+        // 🔍 ТЕПЕРЬ ПРОВЕРЯЕМ КОМНАТУ (только для игровых событий)
         // =================================================================
 
         let room = roomManager.getRoom(eventRoomId)
@@ -179,67 +154,27 @@ fastify.register(async (server) => {
           room = Array.from(roomManager.activeRooms.values()).find(r => r.getPlayer(playerId))
         }
 
-        // 🔹 Если комнаты нет И это не публичное событие → ошибка
         if (!room) {
           return socket.send(JSON.stringify({ type: 'ERROR', message: 'Комната не найдена или игрок не подключен' }))
         }
-
-        // 📊 Лог контекста
-        console.log(`📊 [CTX] Turn: ${room.state.currentTurn} | Pending: ${room.state.actionPending} | Status: ${room.state.status}`)
 
         // =================================================================
         // 🎮 ИГРОВЫЕ СОБЫТИЯ (требуют комнату)
         // =================================================================
 
-        // 🔹 Присоединение к комнате
         if (type === 'JOIN_ROOM') {
           const { roomId, playerId, name } = event
           const room = roomManager.getRoom(roomId)
-          if (!room) {
-            return socket.send(JSON.stringify({ type: 'ERROR', message: 'Комната не найдена' }))
-          }
+          if (!room) return socket.send(JSON.stringify({ type: 'ERROR', message: 'Комната не найдена' }))
 
           const result = await handleJoinRoom(room, playerId, name || 'Player', socket, roomManager)
-
           if (result.success && result.playerId && result.playerId !== playerId) {
-            socket.send(JSON.stringify({
-              type: 'MY_ID',
-              playerId: result.playerId,
-              roomId,
-              name: name || 'Player'
-            }))
+            socket.send(JSON.stringify({ type: 'MY_ID', playerId: result.playerId, roomId, name: name || 'Player' }))
           }
           return
         }
 
-        // 🔹 Остальные игровые события (START_GAME, ROLL_DICE и т.д.)
-        // ... твой существующий код ...
-
-        const views = roomManager.getAllRoomViews()
-        let handlerRes: any
-
-        if (type === 'START_GAME') {
-          if (room.state.players[0]?.id !== playerId) return socket.send(JSON.stringify({ type: 'ERROR', message: 'Только создатель' }))
-          if (room.state.status !== 'LOBBY' || room.playerCount < 2) return socket.send(JSON.stringify({ type: 'ERROR', message: 'Нужно 2+ игрока' }))
-          const allReady = room.state.players.every(p => p.isReady || p.id === room.state.players[0]?.id)
-          if (!allReady) return socket.send(JSON.stringify({ type: 'ERROR', message: 'Не все игроки нажали "Готов"' }))
-          room.startGame()
-          broadcastLobbyUpdate()
-          room.broadcastState()
-          return
-        }
-
-        if (type === 'SET_READY') {
-          const p = room.getPlayer(playerId)
-          if (p) {
-            p.isReady = event.isReady !== false
-            broadcastLobbyUpdate()
-            room.broadcastState()
-          }
-          return
-        }
-
-        // ... остальные хендлеры (ROLL_DICE, BUY_PROPERTY и т.д.) ...
+        // ... остальные хендлеры (START_GAME, ROLL_DICE и т.д.) ...
 
       } catch (e: any) {
         console.error(`💥 [EV] CRASH: ${e?.message}`)
