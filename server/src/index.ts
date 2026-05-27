@@ -161,18 +161,6 @@ fastify.register(async (server) => {
         // 🔍 ТЕПЕРЬ ПРОВЕРЯЕМ КОМНАТУ (только для игровых событий)
         // =================================================================
         console.log(`🔍 [DEBUG] Checking room for event: ${type}`)
-        let room = roomManager.getRoom(eventRoomId)
-        if (!room && playerId) {
-          room = Array.from(roomManager.activeRooms.values()).find(r => r.getPlayer(playerId))
-        }
-
-        if (!room) {
-          return socket.send(JSON.stringify({ type: 'ERROR', message: 'Комната не найдена или игрок не подключен' }))
-        }
-
-        // =================================================================
-        // 🎮 ИГРОВЫЕ СОБЫТИЯ (требуют комнату)
-        // =================================================================
 
         if (type === 'JOIN_ROOM') {
           const { roomId, playerId, name } = event
@@ -185,6 +173,20 @@ fastify.register(async (server) => {
           }
           return
         }
+
+
+        let room = roomManager.getRoom(eventRoomId)
+        if (!room && playerId) {
+          room = Array.from(roomManager.activeRooms.values()).find(r => r.getPlayer(playerId))
+        }
+
+        if (!room) {
+          return socket.send(JSON.stringify({ type: 'ERROR', message: 'Комната не найдена или игрок не подключен' }))
+        }
+
+        // =================================================================
+        // 🎮 ИГРОВЫЕ СОБЫТИЯ (требуют комнату)
+        // =================================================================
 
         // ... остальные хендлеры (START_GAME, ROLL_DICE и т.д.) ...
 
