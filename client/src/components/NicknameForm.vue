@@ -1,6 +1,6 @@
 <!-- client/src/components/NicknameForm.vue -->
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'  // 🔹 Добавили watch
 import { useSession } from '../composables/useSession'
 import { sendEvent } from '../lib/ws'
 
@@ -12,6 +12,15 @@ const isLoading = ref(false)
 const emit = defineEmits<{
   (e: 'submit', name: string): void
 }>()
+
+// 🔹 Авто-сброс лоадера, когда ник успешно зарегистрирован
+watch(playerName, (newName, oldName) => {
+  if (oldName === '' && newName && isLoading.value) {
+    console.log('✅ [NicknameForm] Registration succeeded, resetting loader')
+    isLoading.value = false
+    emit('submit', newName)  // 🔹 Сообщаем родителю, что всё ок
+  }
+})
 
 const validateNickname = (name: string): boolean => {
   if (!name.trim()) {
@@ -33,7 +42,7 @@ const validateNickname = (name: string): boolean => {
   return true
 }
 
-const handleSubmit = () => {
+const handleSubmit = async () => {
   error.value = ''
   const cleanName = nickname.value.trim()
 
@@ -47,9 +56,16 @@ const handleSubmit = () => {
   }
 
   isLoading.value = true
-  // 🔹 Отправляем ТОЛЬКО запрос на регистрацию ника
   sendEvent({ type: 'SET_NICKNAME', nickname: cleanName })
-  // ✅ Ответ придет в ws.onmessage → NICKNAME_ACCEPTED → авто-переход в лобби
+
+  // 🔹 Страховка: если сервер не ответил за 5 сек
+  setTimeout(() => {
+    if (isLoading.value) {
+      console.warn('⚠️ [NicknameForm] No response from server, resetting loader')
+      isLoading.value = false
+      error.value = 'Сервер не отвечает. Попробуйте ещё раз.'
+    }
+  }, 5000)
 }
 
 const handleRandomName = () => {
