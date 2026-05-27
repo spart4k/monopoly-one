@@ -32,7 +32,7 @@ import {
 const fastify = Fastify({ logger: false })
 const roomManager = new RoomManager()
 const allSockets = new Set<any>()
-
+const guestRegistry = new Map<string, string>()
 // 🔹 1. Плагины
 fastify.register(fastifyCors, { origin: '*' })
 fastify.register(fastifyWebsocket)
@@ -117,6 +117,38 @@ fastify.register(async (server) => {
             : { type: 'AUTH_SUCCESS', ...res }
           console.log(`📤 [EV] Sending response:`, response.type)
           socket.send(JSON.stringify(response))
+          return
+        }
+
+        // 🔐 Гостевая регистрация по нику
+        if (type === 'SET_NICKNAME') {
+          const nick = event.nickname?.trim()
+          if (!nick || nick.length < 2 || nick.length > 20) {
+            return socket.send(JSON.stringify({ type: 'ERROR', message: 'Ник от 2 до 20 символов' }))
+          }
+          if (!/^[\w\s\u0400-\u04FF\-]+$/u.test(nick)) {
+            return socket.send(JSON.stringify({ type: 'ERROR', message: 'Только буквы, цифры, пробелы и -' }))
+          }
+
+          const norm = nick.toLowerCase()
+          // 🔹 Проверяем, не занят ли ник в реестре или в активных комнатах
+          const isTaken = Array.from(guestRegistry.keys()).some(n => n.toLowerCase() === norm) ||
+            Array.from(roomManager.activeRooms.values()).some(r =>
+              r.state.players.some(p => p.name.toLowerCase() === norm)
+            )
+
+          if (isTaken) {
+            return socket.send(JSON.stringify({ type: 'ERROR', message: 'Этот ник уже занят' }))
+          }
+
+          // 🔹 Генерируем ID и сохраняем
+          const playerId = `p_${Math.random().toString(36).substring(2, 10)}`
+          guestRegistry.set(norm, playerId)
+          socket.playerId = playerId
+          socket.nickname = nick
+
+          console.log(`✅ [AUTH] Guest registered: ${nick} -> ${playerId}`)
+          socket.send(JSON.stringify({ type: 'NICKNAME_ACCEPTED', playerId, nickname: nick }))
           return
         }
 

@@ -1,6 +1,6 @@
 // client/src/lib/ws.ts
 import { ref } from 'vue'
-import { myId, roomId } from '../composables/useSession'
+import { myId, roomId, playerName } from '../composables/useSession'  // ✅ Добавили playerName
 
 let ws: WebSocket | null = null
 let reconnectAttempts = 0
@@ -17,8 +17,6 @@ export function initWs(
 
   ws = new WebSocket(url)
 
-  // В функции initWs, внутри ws.onopen:
-
   ws.onopen = () => {
     isConnected.value = true
     reconnectAttempts = 0
@@ -30,23 +28,20 @@ export function initWs(
     const storedName = sessionStorage.getItem('monopoly_playerName')
 
     if (storedId && storedRoom) {
-      // 🔹 Если есть сессия — переподключаемся к комнате
       console.log('🔄 [WS] Rejoining room:', storedRoom, 'as', storedName)
       ws?.send(JSON.stringify({
         type: 'JOIN_ROOM',
         playerId: storedId,
         roomId: storedRoom,
-        name: storedName || 'Player'  // 🔹 Отправляем ник
+        name: storedName || 'Player'
       }))
     } else if (storedName) {
-      // 🔹 Если есть ник, но нет комнаты — запрашиваем лобби
       console.log('📋 [WS] Requesting lobby as', storedName)
       ws?.send(JSON.stringify({
         type: 'GET_LOBBY',
         name: storedName
       }))
     } else {
-      // 🔹 Если ничего нет — просто запрашиваем лобби (покажет форму ника)
       ws?.send(JSON.stringify({ type: 'GET_LOBBY' }))
     }
   }
@@ -54,6 +49,21 @@ export function initWs(
   ws.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data as string)
+
+      // 🔹 Обработка успешной регистрации ника
+      if (data.type === 'NICKNAME_ACCEPTED') {
+        myId.value = data.playerId
+        playerName.value = data.nickname  // ✅ Теперь работает, т.к. импортировали
+        sessionStorage.setItem('monopoly_playerId', data.playerId)
+        sessionStorage.setItem('monopoly_playerName', data.nickname)
+
+        console.log(`✅ [WS] Nick registered: ${data.nickname} (${data.playerId})`)
+
+        // 🔹 Автоматически запрашиваем лобби после успешной регистрации
+        setTimeout(() => sendEvent({ type: 'GET_LOBBY' }), 150)
+        return // Прерываем, чтобы не дублировать в store
+      }
+
       console.log('🧩 [WS] Parsed event:', data.type)
       onMessage(data)
     } catch (e) {
@@ -65,7 +75,6 @@ export function initWs(
     console.log('🔌 [WS] Closed')
     isConnected.value = false
 
-    // 🔁 Авто-реконнект (только если были попытки взаимодействия)
     if (reconnectAttempts < MAX_RECONNECT) {
       reconnectAttempts++
       const delay = Math.min(1000 * reconnectAttempts, 5000)
@@ -83,58 +92,34 @@ export function initWs(
 
   return {
     send: (payload: any) => {
-      if (ws?.readyState === 1) {
-        // 🔑 Безопасный получатель ID
-        const safePlayerId = myId.value && myId.value !== 'null' ? myId.value : null
-        const safeRoomId = roomId.value && roomId.value !== 'null' ? roomId.value : null
-
-        // 🔑 Если нет валидного playerId — не отправляем игровые действия
-        console.log(payload. safePlayerId)
-        if (payload.playerId !== undefined && !safePlayerId) {
-          console.error('❌ [WS] Blocked send: invalid playerId', {
-            myId: myId.value,
-            stored: sessionStorage.getItem('monopoly_playerId'),
-            payloadType: payload.type
-          })
-          return false
-        }
-
-        const finalPayload = {
-          ...payload,
-          playerId: safePlayerId || payload.playerId,
-          roomId: safeRoomId || payload.roomId
-        }
-
-        console.log('📤 [WS] Sending:', finalPayload.type, 'playerId:', finalPayload.playerId, 'roomId:', finalPayload.roomId)
-        ws.send(JSON.stringify(finalPayload))
-        return true
+      if (ws?.readyState !== 1) {
+        console.warn('⚠️ [WS] Send failed, readyState:', ws?.readyState)
+        return false
       }
-      console.warn('⚠️ [WS] Send failed, readyState:', ws?.readyState)
-      return false
+      return sendEvent(payload)
     },
     close: () => ws?.close()
   }
 }
 
-export function sendEvent(payload: any) {
+// 🔹 Вынесенная функция отправки (используется и внутри initWs, и снаружи)
+export function sendEvent(payload: any): boolean {
   if (ws?.readyState !== 1) {
     console.warn('⚠️ [WS] sendEvent: not connected (readyState:', ws?.readyState, ')')
     return false
   }
 
-  // 🔑 Безопасный получатель ID
+  // 🔹 Безопасные значения из сессии
   const safePlayerId = myId.value && myId.value !== 'null' ? myId.value : null
   const safeRoomId = roomId.value && roomId.value !== 'null' ? roomId.value : null
 
-  // 🔑 Если нет валидного playerId — не отправляем игровые действия
-  console.log(payload, safePlayerId)
-  const allowsAnonymous = ['JOIN_ROOM', 'GET_LOBBY', 'REGISTER', 'LOGIN'].includes(payload.type)
+  // 🔹 События, которые НЕ требуют аутентификации (создают сессию)
+  const allowsAnonymous = ['SET_NICKNAME', 'JOIN_ROOM', 'GET_LOBBY', 'REGISTER', 'LOGIN'].includes(payload.type)
 
-// 🔹 Если playerId указан в пейлоаде, но не совпадает с сессией → блокируем (защита от подмены)
+  // 🔹 Проверка: если playerId в пейлоаде не совпадает с сессией → блокируем (защита от подмены)
   if (payload.playerId !== undefined && !allowsAnonymous) {
-    const safePlayerId = myId.value || sessionStorage.getItem('monopoly_playerId')
-
-    if (payload.playerId !== safePlayerId) {
+    const sessionPlayerId = myId.value || sessionStorage.getItem('monopoly_playerId')
+    if (payload.playerId !== sessionPlayerId) {
       console.error(`❌ [WS] Blocked send: playerId mismatch`, {
         myId: myId.value,
         stored: sessionStorage.getItem('monopoly_playerId'),
@@ -145,13 +130,14 @@ export function sendEvent(payload: any) {
     }
   }
 
-// 🔹 Для игровых событий (не анонимных) требуем, чтобы игрок был в сессии
-  const requiresAuth = !['JOIN_ROOM', 'GET_LOBBY', 'REGISTER', 'LOGIN'].includes(payload.type)
-  if (requiresAuth && !myId.value && !sessionStorage.getItem('monopoly_playerId')) {
+  // 🔹 Для игровых событий требуем, чтобы игрок был в сессии
+  const requiresAuth = !allowsAnonymous
+  if (requiresAuth && !safePlayerId && !sessionStorage.getItem('monopoly_playerId')) {
     console.warn(`⚠️ [WS] Auth required for ${payload.type}, but no playerId in session`)
     // Не блокируем жестко — пусть сервер сам отклонит, если нужно
   }
 
+  // 🔹 Формируем финальный пейлоад
   const finalPayload = {
     ...payload,
     playerId: safePlayerId || payload.playerId,
@@ -159,8 +145,14 @@ export function sendEvent(payload: any) {
   }
 
   console.log('📤 [WS] Sending:', finalPayload.type, 'playerId:', finalPayload.playerId, 'roomId:', finalPayload.roomId)
-  ws.send(JSON.stringify(finalPayload))
-  return true
+
+  try {
+    ws?.send(JSON.stringify(finalPayload))
+    return true
+  } catch (e) {
+    console.error('💥 [WS] Send error:', e)
+    return false
+  }
 }
 
 export function isWsReady(): boolean {
@@ -171,7 +163,8 @@ export type WsEvent =
   | { type: 'SYNC_STATE'; payload: any }
   | { type: 'ACTION_REQUIRED'; title: string; message: string; amount?: number; spaceId?: number }
   | { type: 'GO_TO_JAIL'; playerId: string }
-  | { type: 'JAIL_SENTENCED'; playerId: string; message: string } // 🔹 Новое
+  | { type: 'JAIL_SENTENCED'; playerId: string; message: string }
   | { type: 'ROOMS_LIST'; rooms: any[] }
   | { type: 'MY_ID'; playerId: string; roomId: string }
+  | { type: 'NICKNAME_ACCEPTED'; playerId: string; nickname: string }  // 🔹 Добавили тип
   | { type: 'ERROR'; message: string }

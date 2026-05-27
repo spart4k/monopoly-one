@@ -33,33 +33,23 @@ const validateNickname = (name: string): boolean => {
   return true
 }
 
-const handleSubmit = async () => {
+const handleSubmit = () => {
   error.value = ''
   const cleanName = nickname.value.trim()
 
-  if (!validateNickname(cleanName)) return
-  if (validateNickname(cleanName)) {
-    emit('submit', cleanName)  // 🔹 Отправляем ник родителю
+  if (!cleanName || cleanName.length < 2) {
+    error.value = 'Минимум 2 символа'
+    return
+  }
+  if (cleanName.length > 20 || !/^[\w\s\u0400-\u04FF\-]+$/u.test(cleanName)) {
+    error.value = 'Только буквы, цифры, пробелы и -'
+    return
   }
 
   isLoading.value = true
-
-  try {
-    // 🔹 Сохраняем ник в сессии
-    setPlayerName(cleanName)
-    ensureSession()
-
-    // 🔹 Запрашиваем список комнат (или создаём, если нужно)
-    sendEvent({ type: 'GET_LOBBY', name: cleanName })
-
-
-    // 🔹 Можно сразу редиректить в лобби, но лучше дождаться ответа сервера
-  } catch (e) {
-    error.value = 'Ошибка подключения. Попробуйте ещё раз.'
-    console.error('Nickname submit error:', e)
-  } finally {
-    isLoading.value = false
-  }
+  // 🔹 Отправляем ТОЛЬКО запрос на регистрацию ника
+  sendEvent({ type: 'SET_NICKNAME', nickname: cleanName })
+  // ✅ Ответ придет в ws.onmessage → NICKNAME_ACCEPTED → авто-переход в лобби
 }
 
 const handleRandomName = () => {

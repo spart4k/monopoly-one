@@ -30,9 +30,6 @@ const canStart = computed(() => isHost.value && store.players.length >= 2 && sto
 onMounted(() => {
   ensureSession()
   // 🔹 Если ник есть — сразу запрашиваем лобби
-  if (playerName.value) {
-    sendEvent({ type: 'GET_LOBBY', name: playerName.value })
-  }
 })
 
 // 🔹 ИСПРАВЛЕНО: используем myId, roomId, playerName напрямую
