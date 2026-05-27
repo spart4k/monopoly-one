@@ -21,7 +21,25 @@ const roomName = ref('')
 const showAuthModal = ref(false)
 
 // 🔹 ИСПРАВЛЕНО: используем переменные напрямую (без session.)
-const isInRoom = computed(() => !!roomId.value && store.status === 'LOBBY')
+const isInRoom = computed(() => {
+  // 🔹 Игрок внутри комнаты, если:
+  // 1. Есть roomId в сессии
+  // 2. Статус игры — LOBBY (не PLAYING)
+  // 3. В комнате есть игроки (включая текущего)
+  const result = !!roomId.value &&
+      store.status === 'LOBBY' &&
+      store.players.some(p => p.id === myId.value)
+
+  console.log('🔍 [UI] isInRoom check:', {
+    hasRoomId: !!roomId.value,
+    status: store.status,
+    hasMe: store.players.some(p => p.id === myId.value),
+    playerCount: store.players.length,
+    result
+  })
+
+  return result
+})
 const me = computed(() => store.players.find(p => p.id === myId.value))
 const isMyReady = computed(() => me.value?.isReady ?? false)
 const isHost = computed(() => store.players.length > 0 && store.players[0].id === myId.value)
@@ -140,27 +158,47 @@ const handleNicknameSubmit = (name: string) => {
           </div>
         </div>
 
-        <aside v-if="isInRoom" class="w-80 bg-gray-800 border-l border-gray-700 p-5 flex flex-col">
-          <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">🚪 Комната <span class="text-purple-400">{{ roomId }}</span></h2>
+        <div v-if="isInRoom" class="bg-gray-800 rounded-xl p-4 mb-4">
+          <h2 class="text-lg font-semibold mb-3">🚪 Комната <span class="text-blue-400">{{ roomId }}</span></h2>
+
+          <!-- Список игроков -->
           <div class="bg-gray-700/40 rounded-lg p-3 mb-4 space-y-2">
             <div v-for="p in store.players" :key="p.id" class="flex items-center justify-between text-sm">
               <div class="flex items-center gap-2">
-                <span class="w-2 h-2 rounded-full" :class="p.id === myId ? 'bg-purple-500' : 'bg-gray-500'"></span>
-                <span>{{ p.name }} <span v-if="p.id === myId" class="text-xs text-purple-300">(Вы)</span></span>
+                <span class="w-2 h-2 rounded-full" :class="p.id === myId ? 'bg-blue-500' : 'bg-gray-500'"></span>
+                <span>{{ p.name }} <span v-if="p.id === myId" class="text-xs text-blue-300">(Вы)</span></span>
               </div>
-              <span class="text-xs" :class="p.isReady ? 'text-green-400' : 'text-gray-400'">{{ p.isReady ? '✅' : '⏳' }}</span>
+              <span class="text-xs" :class="p.isReady ? 'text-green-400' : 'text-gray-400'">
+        {{ p.isReady ? '✅' : '⏳' }}
+      </span>
             </div>
           </div>
-          <div class="space-y-2 mt-auto">
-            <button @click="toggleReady" class="w-full py-2.5 rounded-lg font-medium transition" :class="isMyReady ? 'bg-yellow-600 hover:bg-yellow-700' : 'bg-green-600 hover:bg-green-700'">
+
+          <!-- Кнопки управления -->
+          <div class="space-y-2">
+            <button
+                @click="toggleReady"
+                class="w-full py-2.5 rounded-lg font-medium transition"
+                :class="isMyReady ? 'bg-yellow-600 hover:bg-yellow-700' : 'bg-green-600 hover:bg-green-700'"
+            >
               {{ isMyReady ? '❌ Отменить готовность' : '✅ Я готов' }}
             </button>
-            <button v-if="isHost" @click="startGame" :disabled="!canStart" class="w-full py-2.5 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed rounded-lg font-medium transition">
+            <button
+                v-if="isHost"
+                @click="startGame"
+                :disabled="!canStart"
+                class="w-full py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed rounded-lg font-medium transition"
+            >
               🚀 Начать игру
             </button>
-            <button @click="leaveRoom" class="w-full py-2 bg-red-900/40 hover:bg-red-900/70 text-red-300 rounded-lg text-sm transition">🚪 Покинуть комнату</button>
+            <button
+                @click="leaveRoom"
+                class="w-full py-2 bg-red-900/40 hover:bg-red-900/70 text-red-300 rounded-lg text-sm transition"
+            >
+              🚪 Покинуть комнату
+            </button>
           </div>
-        </aside>
+        </div>
       </main>
 
       <Teleport to="body">

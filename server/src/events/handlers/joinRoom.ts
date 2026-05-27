@@ -55,12 +55,6 @@ export async function handleJoinRoom(
   room.addSocket(id, sock)
   console.log(`🔗 [JOIN] Socket привязан: ${id}, readyState=${sock.readyState}`)
 
-  // 🔹 6. Старт игры если 2+ игрока и статус LOBBY
-  if (room.state.status === 'LOBBY' && room.playerCount >= 2) {
-    room.startGame()
-    console.log(`🎮 [JOIN] Игра стартовала!`)
-  }
-
   // 🔹 7. Формируем ответ с новым playerId (если создан)
   const payload = buildSyncPayload(room.state)
   const message = JSON.stringify({

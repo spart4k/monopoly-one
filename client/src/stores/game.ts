@@ -14,11 +14,36 @@ export type PendingInfo = { title: string; message: string; icon: string; amount
 
 export const useGameStore = defineStore('game', () => {
   const status = ref<'LOBBY' | 'PLAYING' | 'ENDED'>('LOBBY')
-  const currentTurn = ref<string>('')
   const lastDice = ref<[number, number]>([1, 1])
   const players = ref<Player[]>([])
   const logs = ref<string[]>([])
-  const availableRooms = ref<any[]>([])
+  const currentTurn = ref<string | null>(null)
+  const actionPending = ref<'NONE' | 'BUY' | 'PAY' | 'ROLL' | 'JAIL' | 'TRADE'>('NONE')
+
+  // 🔹 Список комнат в лобби (отдельно!)
+  const availableRooms = ref<Array<{id: string, status: string, players: any[]}>>([])
+
+  // 🔹 Обновление состояния из SYNC_STATE
+  const updateState = (payload: any) => {
+    if (payload.status) status.value = payload.status
+    if (payload.players) players.value = payload.players
+    if (payload.currentTurn !== undefined) currentTurn.value = payload.currentTurn
+    if (payload.actionPending) actionPending.value = payload.actionPending
+  }
+
+  // 🔹 Обновление списка комнат (КРИТИЧНО: присваиваем новый массив!)
+  const updateRoomsList = (rooms: any[]) => {
+    console.log('🔄 [STORE] Rooms updated:', rooms)
+    availableRooms.value = [...rooms]  // 🔹 Создаём новый массив для реактивности
+  }
+
+  // 🔹 Сброс
+  const reset = () => {
+    status.value = 'LOBBY'
+    players.value = []
+    currentTurn.value = null
+    actionPending.value = 'NONE'
+  }
 
   const pendingAction = ref<'BUY' | 'CARD' | 'INFO' | 'DOUBLE_TURN' | null>(null)
   const selectedSpaceId = ref<number | null>(null)

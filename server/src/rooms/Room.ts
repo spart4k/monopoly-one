@@ -10,6 +10,12 @@ export type Player = {
   isReady?: boolean; housesBoughtThisTurn: boolean; isBankrupt: boolean, pendingJail?: boolean
 }
 
+export type RoomView = {
+  id: string
+  state: RoomState
+  sockets: Map<string, WebSocket>
+}
+
 export type RoomState = {
   status: 'LOBBY' | 'PLAYING' | 'ENDED'
   players: Player[]

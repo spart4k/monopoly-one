@@ -185,6 +185,9 @@ fastify.register(async (server) => {
               name: name || 'Player'
             }))
           }
+
+          broadcastLobbyUpdate()
+
           console.log(`✅ [JOIN_ROOM] DONE, returning`)
           return  // 🔹 КРИТИЧНО: выходим, чтобы не шла общая проверка комнаты
         }

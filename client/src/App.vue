@@ -22,6 +22,21 @@ onMounted(() => {
       (data) => {
         console.log('📥 [APP] Received:', data.type, data)
 
+        if (data.type === 'SYNC_STATE' && data.payload) {
+          store.updateState(data.payload)
+        }
+
+        // 🔹 КРИТИЧНО: обновляем список комнат
+        if (data.type === 'ROOMS_LIST' && Array.isArray(data.rooms)) {
+          console.log('📋 [APP] Rooms list:', data.rooms)
+          store.updateRoomsList(data.rooms)  // 🔹 Это обновит availableRooms в Lobby.vue
+        }
+
+        if (data.type === 'MY_ID' && data.playerId && data.roomId) {
+          sessionStorage.setItem('monopoly_playerId', data.playerId)
+          sessionStorage.setItem('monopoly_roomId', data.roomId)
+        }
+
         // 🔹 Обработка НОВОГО события: отложенный арест
         if (data.type === 'JAIL_SENTENCED') {
           // 🔹 Показываем уведомление, но НЕ перемещаем фишку ещё
