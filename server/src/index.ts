@@ -9,6 +9,7 @@ import { buildSyncPayload, broadcast } from './lib/ws-utils'
 import { verifyToken } from './lib/auth'
 import { handleRegister, handleLogin } from './events/auth'
 import { registerAdminRoutes } from './modules/admin/admin.routes'
+import { handleJoinRoom } from './events/handlers/joinRoom'  // 🔹 Импорт хендлера
 
 import {
   handleRollDice,
@@ -103,7 +104,7 @@ fastify.register(async (server) => {
 
         console.log(`\n📥 [EV] INCOMING: ${type} | Player: ${playerId || 'anon'} | Room: ${eventRoomId}`)
 
-        // 🔐 ПУБЛИЧНЫЕ: Авторизация
+        // 🔐 ПУБЛИЧНЫЕ: Авторизация (опционально)
         if (type === 'REGISTER') {
           const res = await handleRegister(email, nickname, password)
           socket.send(JSON.stringify(res.error ? { type: 'ERROR', message: res.error } : { type: 'AUTH_SUCCESS', ...res }))
@@ -111,11 +112,9 @@ fastify.register(async (server) => {
         }
         if (type === 'LOGIN') {
           const res = await handleLogin(email, password)
-          socket.send(JSON.stringify(res.error ? { type: 'ERROR', message: res.error } : { type: 'AUTH_SUCCESS', ...res }))
           const response = res.error
             ? { type: 'ERROR', message: res.error }
             : { type: 'AUTH_SUCCESS', ...res }
-
           console.log(`📤 [EV] Sending response:`, response.type)
           socket.send(JSON.stringify(response))
           return
@@ -138,7 +137,7 @@ fastify.register(async (server) => {
         if (!room && playerId) {
           room = Array.from(roomManager.activeRooms.values()).find(r => r.getPlayer(playerId))
         }
-        if (!room && type !== 'JOIN_ROOM') {
+        if (!room && type !== 'JOIN_ROOM' && type !== 'GET_LOBBY') {
           return socket.send(JSON.stringify({ type: 'ERROR', message: 'Комната не найдена или игрок не подключен' }))
         }
 
@@ -148,39 +147,38 @@ fastify.register(async (server) => {
         }
 
         // 🎮 ИГРОВЫЕ СОБЫТИЯ
+
+        // 🔹 ПРИСОЕДИНЕНИЕ К КОМНАТЕ (без авторизации)
         if (type === 'JOIN_ROOM') {
-          const pid = playerId || (socket as any).playerId
-          if (!pid || !eventRoomId) return socket.send(JSON.stringify({ type: 'ERROR', message: 'No playerId or roomId' }))
+          const { roomId, playerId, name } = event
 
-          room = await roomManager.getOrCreateRoom(eventRoomId)
-
-          // 🔑 1. Если игрок с таким ID уже есть → просто обновляем сокет (реконнект)
-          let player = room.getPlayer(pid)
-          if (player) {
-            room.addSocket(player.id, socket)
-            ;(socket as any).playerId = player.id
-            socket.send(JSON.stringify({ type: 'MY_ID', playerId: player.id, roomId: room.id }))
-            room.broadcastState()
-            return
+          const room = roomManager.getRoom(roomId)
+          if (!room) {
+            return socket.send(JSON.stringify({ type: 'ERROR', message: 'Комната не найдена' }))
           }
 
-          // 🔑 2. Защита от дублей по имени (разные табы с одним аккаунтом)
-          if (room.state.players.some(p => p.name === name)) {
-            return socket.send(JSON.stringify({ type: 'ERROR', message: 'Игрок с таким именем уже в комнате' }))
+          // 🔹 Вызываем хендлер (playerId может быть undefined)
+          const result = await handleJoinRoom(
+            room,
+            playerId,           // 🔹 Может быть undefined → сервер сгенерирует новый ID
+            name || 'Player',
+            socket,             // 🔹 Используем socket, а не ws
+            roomManager
+          )
+
+          // 🔹 Если сервер сгенерировал новый ID — отправляем клиенту для сохранения
+          if (result.success && result.playerId && result.playerId !== playerId) {
+            socket.send(JSON.stringify({
+              type: 'MY_ID',
+              playerId: result.playerId,
+              roomId,
+              name: name || 'Player'
+            }))
           }
-
-          // 🔑 3. Создаём нового игрока
-          player = room.addPlayer({ id: pid, name: name || `Player_${pid.slice(-4)}`, color: room.getNextColor(), pos: 0, money: 1500, mortgaged: [] })
-          room.addSocket(player.id, socket)
-          ;(socket as any).playerId = player.id
-          room.addLog(`👤 ${player.name} присоединился`)
-
-          broadcastLobbyUpdate()
-          socket.send(JSON.stringify({ type: 'MY_ID', playerId: player.id, roomId: room.id }))
-          room.broadcastState()
           return
         }
 
+        // 🔹 СТАРТ ИГРЫ
         if (type === 'START_GAME') {
           if (!room) return
           if (room.state.players[0]?.id !== playerId) return socket.send(JSON.stringify({ type: 'ERROR', message: 'Только создатель' }))
@@ -194,9 +192,9 @@ fastify.register(async (server) => {
           return
         }
 
+        // 🔹 ГОТОВНОСТЬ ИГРОКА
         if (type === 'SET_READY') {
           if (!room || room.state.status !== 'LOBBY') return
-
           const p = room.getPlayer(playerId)
           if (p) {
             p.isReady = event.isReady !== false
@@ -206,29 +204,77 @@ fastify.register(async (server) => {
           return
         }
 
-        if (type === 'GET_LOBBY') { broadcastLobbyUpdate(socket); return }
+        // 🔹 ЗАПРОС ЛОББИ
+        if (type === 'GET_LOBBY') {
+          broadcastLobbyUpdate(socket)
+          return
+        }
 
-        // 🔹 Маршрутизация игровых хендлеров
+        // 🔹 МАРШРУТИЗАЦИЯ ИГРОВЫХ ХЕНДЛЕРОВ
+        // Для игровых событий проверяем только, что игрок в комнате (без JWT)
         const views = roomManager.getAllRoomViews()
         let handlerRes: any
 
-        if (type === 'ROLL_DICE') handlerRes = handleRollDice(room, playerId, views, event.targetSpaceId)
-        else if (type === 'BUY_PROPERTY') handlerRes = handleBuyProperty(room, playerId, Number(spaceId), views)
-        else if (type === 'PASS_ACTION') handlerRes = handlePassAction(room, playerId, views)
-        else if (type === 'BANKRUPTCY') handlerRes = handleBankruptcy(room, playerId, views)
-        else if (type === 'PAY_JAIL_FINE' || type === 'USE_JAIL_CARD') {
-          handlerRes = type === 'PAY_JAIL_FINE' ? handlePayJailFine(room, playerId, views) : useJailCard(room, playerId, views)
+        if (type === 'ROLL_DICE') {
+          if (!room || !room.getPlayer(playerId)) return socket.send(JSON.stringify({ type: 'ERROR', message: 'Not in room' }))
+          handlerRes = handleRollDice(room, playerId, views, event.targetSpaceId)
         }
-        else if (type === 'BUY_HOUSE') handlerRes = handleBuyHouse(room, playerId, Number(spaceId), views)
-        else if (type === 'SELL_HOUSE') handlerRes = handleSellHouse(room, playerId, Number(spaceId), views)
-        else if (type === 'TRADE_INIT') handlerRes = handleTradeInit(room, playerId, event.responder, views)
-        else if (type === 'TRADE_EDIT') handlerRes = handleTradeEdit(room, playerId, event.side, event.offer, views)
-        else if (type === 'TRADE_PROPOSE') handlerRes = handleTradePropose(room, playerId, views)
-        else if (type === 'TRADE_ACCEPT') handlerRes = handleTradeAccept(room, playerId, views)
-        else if (type === 'TRADE_DECLINE') handlerRes = handleTradeDecline(room, playerId, views)
-        else if (type === 'MORTGAGE_PROPERTY') handlerRes = handleMortgage(room, playerId, Number(event.spaceId), views)
-        else if (type === 'UNMORTGAGE_PROPERTY') handlerRes = handleUnmortgage(room, playerId, Number(event.spaceId), views)
+        else if (type === 'BUY_PROPERTY') {
+          if (!room || !room.getPlayer(playerId)) return socket.send(JSON.stringify({ type: 'ERROR', message: 'Not in room' }))
+          handlerRes = handleBuyProperty(room, playerId, Number(spaceId), views)
+        }
+        else if (type === 'PASS_ACTION') {
+          if (!room || !room.getPlayer(playerId)) return socket.send(JSON.stringify({ type: 'ERROR', message: 'Not in room' }))
+          handlerRes = handlePassAction(room, playerId, views)
+        }
+        else if (type === 'BANKRUPTCY') {
+          if (!room || !room.getPlayer(playerId)) return socket.send(JSON.stringify({ type: 'ERROR', message: 'Not in room' }))
+          handlerRes = handleBankruptcy(room, playerId, views)
+        }
+        else if (type === 'PAY_JAIL_FINE' || type === 'USE_JAIL_CARD') {
+          if (!room || !room.getPlayer(playerId)) return socket.send(JSON.stringify({ type: 'ERROR', message: 'Not in room' }))
+          handlerRes = type === 'PAY_JAIL_FINE'
+            ? handlePayJailFine(room, playerId, views)
+            : useJailCard(room, playerId, views)
+        }
+        else if (type === 'BUY_HOUSE') {
+          if (!room || !room.getPlayer(playerId)) return socket.send(JSON.stringify({ type: 'ERROR', message: 'Not in room' }))
+          handlerRes = handleBuyHouse(room, playerId, Number(spaceId), views)
+        }
+        else if (type === 'SELL_HOUSE') {
+          if (!room || !room.getPlayer(playerId)) return socket.send(JSON.stringify({ type: 'ERROR', message: 'Not in room' }))
+          handlerRes = handleSellHouse(room, playerId, Number(spaceId), views)
+        }
+        else if (type === 'TRADE_INIT') {
+          if (!room || !room.getPlayer(playerId)) return socket.send(JSON.stringify({ type: 'ERROR', message: 'Not in room' }))
+          handlerRes = handleTradeInit(room, playerId, event.responder, views)
+        }
+        else if (type === 'TRADE_EDIT') {
+          if (!room || !room.getPlayer(playerId)) return socket.send(JSON.stringify({ type: 'ERROR', message: 'Not in room' }))
+          handlerRes = handleTradeEdit(room, playerId, event.side, event.offer, views)
+        }
+        else if (type === 'TRADE_PROPOSE') {
+          if (!room || !room.getPlayer(playerId)) return socket.send(JSON.stringify({ type: 'ERROR', message: 'Not in room' }))
+          handlerRes = handleTradePropose(room, playerId, views)
+        }
+        else if (type === 'TRADE_ACCEPT') {
+          if (!room || !room.getPlayer(playerId)) return socket.send(JSON.stringify({ type: 'ERROR', message: 'Not in room' }))
+          handlerRes = handleTradeAccept(room, playerId, views)
+        }
+        else if (type === 'TRADE_DECLINE') {
+          if (!room || !room.getPlayer(playerId)) return socket.send(JSON.stringify({ type: 'ERROR', message: 'Not in room' }))
+          handlerRes = handleTradeDecline(room, playerId, views)
+        }
+        else if (type === 'MORTGAGE_PROPERTY') {
+          if (!room || !room.getPlayer(playerId)) return socket.send(JSON.stringify({ type: 'ERROR', message: 'Not in room' }))
+          handlerRes = handleMortgage(room, playerId, Number(event.spaceId), views)
+        }
+        else if (type === 'UNMORTGAGE_PROPERTY') {
+          if (!room || !room.getPlayer(playerId)) return socket.send(JSON.stringify({ type: 'ERROR', message: 'Not in room' }))
+          handlerRes = handleUnmortgage(room, playerId, Number(event.spaceId), views)
+        }
 
+        // 🔹 Обработка ошибок хендлеров
         if (handlerRes?.error) {
           socket.send(JSON.stringify({ type: 'ERROR', message: handlerRes.error }))
         }
@@ -258,7 +304,7 @@ fastify.register(async (server) => {
 
           // 🔹 Если комната пуста И в лобби → удаляем её
           if (room.sockets.size === 0 && room.state.status === 'LOBBY') {
-            roomManager.removeRoom(room.id)  // ✅ Теперь метод существует!
+            roomManager.removeRoom(room.id)
             broadcastLobbyUpdate()
           } else {
             room.broadcastState()

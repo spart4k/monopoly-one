@@ -2,71 +2,91 @@
 import type { Room } from '../../rooms/Room'
 import type { RoomManager } from '../../rooms/RoomManager'
 import type { WebSocket } from 'ws'
-import { buildSyncPayload } from '../../lib/ws-utils'
+import { buildSyncPayload, broadcast } from '../../lib/ws-utils'
 
 export async function handleJoinRoom(
   room: Room,
-  playerId: string,
+  playerId: string | undefined,  // 🔹 Может быть undefined при первом входе
   playerName: string,
   sock: WebSocket,
   roomManager: RoomManager
 ) {
-  console.log(`🔍 [JOIN] START: room=${room.id}, player=${playerName}(${playerId})`)
+  console.log(`🔍 [JOIN] START: room=${room.id}, player=${playerName}(${playerId || 'new'})`)
 
-  // 1. Создаем или обновляем игрока
-  let player = room.getPlayer(playerId)
+  // 🔹 Если playerId не передан — генерируем новый
+  const id = playerId || `p_${Math.random().toString(36).substring(2, 10)}`
+
+  // 🔹 sanitise имя
+  const name = playerName?.trim().slice(0, 20) || `Player_${id.slice(-4)}`
+
+  // 🔹 Создаем или обновляем игрока
+  let player = room.getPlayer(id)
   if (!player) {
     player = room.addPlayer({
-      id: playerId,
-      name: playerName,
+      id,
+      name,
       color: room.getNextColor(),
       pos: 0,
-      money: 1500
+      money: 1500,
+      properties: [],
+      houses: {},
+      mortgaged: [],
+      isInJail: false,
+      jailTurns: 0,
+      jailCards: 0,
+      consecutiveDoubles: 0,
+      housesBoughtThisTurn: false,
+      isReady: false,
+      isBankrupt: false
     })
-    console.log(`✅ [JOIN] Новый игрок создан: ${playerName}`)
+    console.log(`✅ [JOIN] Новый игрок создан: ${name} (${id})`)
   } else {
-    console.log(`♻️ [JOIN] Игрок уже есть, обновляем: ${playerName}`)
+    // 🔹 Обновляем имя, если изменилось
+    player.name = name
+    console.log(`♻️ [JOIN] Игрок обновлён: ${name} (${id})`)
   }
 
-  // 2. Привязываем сокет (критично!)
-  room.addSocket(playerId, sock)
-  console.log(`🔗 [JOIN] Socket привязан: ${playerId}, readyState=${sock.readyState}`)
+  // 🔹 Привязываем сокет (критично!)
+  room.addSocket(id, sock)
+  console.log(`🔗 [JOIN] Socket привязан: ${id}, readyState=${sock.readyState}`)
 
-  // 3. Старт игры если 2+ игрока
+  // 🔹 Старт игры если 2+ игрока и статус LOBBY
   if (room.state.status === 'LOBBY' && room.playerCount >= 2) {
     room.startGame()
     console.log(`🎮 [JOIN] Игра стартовала!`)
   }
 
-  // 4. Формируем ответ
+  // 🔹 Формируем ответ с новым playerId (если создан)
   const payload = buildSyncPayload(room.state)
-  const message = JSON.stringify({ type: 'SYNC_STATE', payload })
-  console.log(`📦 [JOIN] Готовим ответ, длина: ${message.length} байт`)
+  const message = JSON.stringify({
+    type: 'SYNC_STATE',
+    payload,
+    // 🔹 Отправляем клиенту его идентификатор для сохранения
+    ...(playerId !== id && { playerId: id, name })
+  })
 
-  // 5. Отправляем ЭТОМУ игроку (синхронно, до возврата из функции)
+  // 🔹 Отправляем ЭТОМУ игроку
   try {
-    if (sock.readyState === 1) { // WebSocket.OPEN
+    if (sock.readyState === 1) {
       sock.send(message)
-      console.log(`🚀 [JOIN] SYNC_STATE отправлен через sock.send()`)
-    } else {
-      console.error(`❌ [JOIN] Socket не открыт! readyState=${sock.readyState}`)
+      console.log(`🚀 [JOIN] SYNC_STATE отправлен`)
     }
   } catch (e) {
     console.error(`💥 [JOIN] Ошибка отправки:`, e)
   }
 
-  // 6. Рассылаем остальным (опционально)
+  // 🔹 Рассылаем остальным (опционально, что новый игрок присоединился)
   const views = roomManager.getAllRoomViews()
   const roomViews = views.get(room.id)
-  if (roomViews) {
-    for (const [pid, s] of roomViews) {
-      if (pid !== playerId && s.readyState === 1) {
-        s.send(message)
-        console.log(`📢 [JOIN] Broadcast to ${pid}`)
-      }
-    }
+  if (roomViews && !playerId) {  // Только если это новый игрок
+    broadcast(roomViews, room.id, {
+      type: 'PLAYER_JOINED',
+      playerId: id,
+      name,
+      color: player.color
+    })
   }
 
-  console.log(`✅ [JOIN] DONE: ${playerName}`)
-  return { success: true }
+  console.log(`✅ [JOIN] DONE: ${name}`)
+  return { success: true, playerId: id }
 }

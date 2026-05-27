@@ -1,61 +1,74 @@
 // client/src/composables/useSession.ts
-import { ref } from 'vue'
+import { ref, onUnmounted  } from 'vue'
 
-// 🔹 Вспомогательная функция для генерации безопасного ID
-const generateId = () => `p_${Math.random().toString(36).slice(2, 9)}`
-
-// 🔹 Безопасное чтение из sessionStorage (фильтруем "null")
-const readSafe = (key: string): string | null => {
-  const val = sessionStorage.getItem(key)
-  return val && val !== 'null' ? val : null
-}
-
-// 🔹 Инициализация рефов
-export const myId = ref<string | null>(readSafe('monopoly_playerId'))
-export const roomId = ref<string | null>(readSafe('monopoly_roomId'))
-export const playerName = ref<string | null>(readSafe('monopoly_playerName'))
-
-// 🔹 Гарантированная инициализация (вызывать в onMounted)
-export function ensureSession(defaultName?: string) {
-  // Если myId нет — генерируем новый
-  if (!myId.value) {
-    const newId = generateId()
-    myId.value = newId
-    sessionStorage.setItem('monopoly_playerId', newId)
-    console.log(`✅ [SESSION] Generated new myId: ${newId}`)
-  }
-
-  // Если имени нет и передано по умолчанию — устанавливаем
-  if (!playerName.value && defaultName?.trim()) {
-    playerName.value = defaultName.trim()
-    sessionStorage.setItem('monopoly_playerName', defaultName.trim())
-  }
-}
+// 🔹 Простое хранилище сессии без JWT
+export const myId = ref<string | null>(null)
+export const roomId = ref<string | null>(null)
+export const playerName = ref<string>('')
 
 export function useSession() {
-  const setSession = (id: string, room: string, name?: string) => {
-    if (id && id !== 'null') {
-      myId.value = id
+  // 🔹 Загрузка из sessionStorage при старте
+  const loadSession = () => {
+    if (typeof window === 'undefined') return
+    myId.value = sessionStorage.getItem('monopoly_playerId') || null
+    roomId.value = sessionStorage.getItem('monopoly_roomId') || null
+    playerName.value = sessionStorage.getItem('monopoly_playerName') || ''
+  }
+
+  // 🔹 Сохранение в sessionStorage
+  const saveSession = (id?: string, room?: string, name?: string) => {
+    if (typeof window === 'undefined') return
+    if (id) {
       sessionStorage.setItem('monopoly_playerId', id)
+      myId.value = id
     }
-    if (room && room !== 'null') {
-      roomId.value = room
+    if (room) {
       sessionStorage.setItem('monopoly_roomId', room)
+      roomId.value = room
     }
-    if (name && name !== 'null') {
+    if (name) {
+      sessionStorage.setItem('monopoly_playerName', name)
       playerName.value = name
+    }
+  }
+
+  // 🔹 Очистка сессии (выход)
+  const clearSession = () => {
+    if (typeof window === 'undefined') return
+    sessionStorage.removeItem('monopoly_playerId')
+    sessionStorage.removeItem('monopoly_roomId')
+    // playerName оставляем, чтобы пользователь не вводил ник заново
+    myId.value = null
+    roomId.value = null
+  }
+
+  // 🔹 Установка имени игрока
+  const setPlayerName = (name: string) => {
+    playerName.value = name
+    if (typeof window !== 'undefined') {
       sessionStorage.setItem('monopoly_playerName', name)
     }
   }
 
-  const clearSession = () => {
-    myId.value = null
-    roomId.value = null
-    playerName.value = null
-    sessionStorage.removeItem('monopoly_playerId')
-    sessionStorage.removeItem('monopoly_roomId')
-    sessionStorage.removeItem('monopoly_playerName')
+  // 🔹 Гарантирует, что сессия загружена (вызывать в onMounted)
+  const ensureSession = () => {
+    loadSession()
   }
 
-  return { myId, roomId, playerName, setSession, clearSession, ensureSession }
+  // 🔹 Авто-загрузка при изменении окна (для вкладок)
+  if (typeof window !== 'undefined') {
+    window.addEventListener('storage', loadSession)
+    onUnmounted(() => window.removeEventListener('storage', loadSession))
+  }
+
+  return {
+    myId,
+    roomId,
+    playerName,
+    loadSession,
+    saveSession,
+    clearSession,
+    setPlayerName,
+    ensureSession
+  }
 }

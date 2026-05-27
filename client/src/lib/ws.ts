@@ -17,25 +17,36 @@ export function initWs(
 
   ws = new WebSocket(url)
 
+  // В функции initWs, внутри ws.onopen:
+
   ws.onopen = () => {
     isConnected.value = true
     reconnectAttempts = 0
     console.log('✅ [WS] Connected!')
 
-    // 🔑 Авто-вход, если сессия есть
+    // 🔹 Авто-вход с ником (без JWT!)
     const storedId = sessionStorage.getItem('monopoly_playerId')
     const storedRoom = sessionStorage.getItem('monopoly_roomId')
     const storedName = sessionStorage.getItem('monopoly_playerName')
 
-    if (storedId && storedId !== 'null' && storedRoom && storedRoom !== 'null') {
-      console.log('🔄 [WS] Auto-rejoining:', storedId, 'in room', storedRoom)
+    if (storedId && storedRoom) {
+      // 🔹 Если есть сессия — переподключаемся к комнате
+      console.log('🔄 [WS] Rejoining room:', storedRoom, 'as', storedName)
       ws?.send(JSON.stringify({
         type: 'JOIN_ROOM',
         playerId: storedId,
         roomId: storedRoom,
-        name: storedName || 'Reconnecting'
+        name: storedName || 'Player'  // 🔹 Отправляем ник
+      }))
+    } else if (storedName) {
+      // 🔹 Если есть ник, но нет комнаты — запрашиваем лобби
+      console.log('📋 [WS] Requesting lobby as', storedName)
+      ws?.send(JSON.stringify({
+        type: 'GET_LOBBY',
+        name: storedName
       }))
     } else {
+      // 🔹 Если ничего нет — просто запрашиваем лобби (покажет форму ника)
       ws?.send(JSON.stringify({ type: 'GET_LOBBY' }))
     }
   }
