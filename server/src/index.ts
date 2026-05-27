@@ -104,12 +104,21 @@ fastify.register(async (server) => {
         // =================================================================
 
         // 🔹 1. Регистрация ника (главное!)
+        // 🔹 1. Регистрация ника (главное!) — С ОТЛАДКОЙ
+        console.log(`🔍 [DEBUG] type="${type}", length=${type?.length}, charCodes=[${Array.from(type||'').map(c=>c.charCodeAt(0))}]`)
+
         if (type === 'SET_NICKNAME') {
+          console.log(`🎯 [DEBUG] ✅ MATCH! Entering SET_NICKNAME handler`)
+
           const nick = nickname?.trim()
+          console.log(`🔍 [DEBUG] nickname="${nickname}", trimmed="${nick}"`)
+
           if (!nick || nick.length < 2 || nick.length > 20) {
+            console.log(`❌ [DEBUG] Nick validation failed`)
             return socket.send(JSON.stringify({ type: 'ERROR', message: 'Ник от 2 до 20 символов' }))
           }
           if (!/^[\w\s\u0400-\u04FF\-]+$/u.test(nick)) {
+            console.log(`❌ [DEBUG] Nick regex failed`)
             return socket.send(JSON.stringify({ type: 'ERROR', message: 'Только буквы, цифры, пробелы и -' }))
           }
 
@@ -120,6 +129,7 @@ fastify.register(async (server) => {
             )
 
           if (isTaken) {
+            console.log(`❌ [DEBUG] Nick "${nick}" is taken`)
             return socket.send(JSON.stringify({ type: 'ERROR', message: 'Этот ник уже занят' }))
           }
 
@@ -130,7 +140,9 @@ fastify.register(async (server) => {
 
           console.log(`✅ [AUTH] Guest: ${nick} -> ${newPlayerId}`)
           socket.send(JSON.stringify({ type: 'NICKNAME_ACCEPTED', playerId: newPlayerId, nickname: nick }))
-          return  // 🔹 КРИТИЧНО: выходим, чтобы не шла проверка комнаты
+          return  // 🔹 КРИТИЧНО: выходим
+        } else {
+          console.log(`❌ [DEBUG] NO MATCH! type="${type}" !== "SET_NICKNAME"`)
         }
 
         // 🔹 2. Запрос лобби (публичный)
