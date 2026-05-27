@@ -6,20 +6,25 @@ import { buildSyncPayload, broadcast } from '../../lib/ws-utils'
 
 export async function handleJoinRoom(
   room: Room,
-  playerId: string | undefined,  // 🔹 Может быть undefined при первом входе
+  playerId: string | undefined,  // 🔹 Может быть undefined!
   playerName: string,
   sock: WebSocket,
   roomManager: RoomManager
 ) {
   console.log(`🔍 [JOIN] START: room=${room.id}, player=${playerName}(${playerId || 'new'})`)
 
-  // 🔹 Если playerId не передан — генерируем новый
-  const id = playerId || `p_${Math.random().toString(36).substring(2, 10)}`
+  // 🔹 1. Валидация: roomId уже проверен в index.ts, playerId опционален
+  // Ничего не блокируем, если playerId нет — сгенерируем ниже
 
-  // 🔹 sanitise имя
+  // 🔹 2. Если playerId не передан — генерируем новый
+  const id = playerId && playerId !== 'null' && playerId !== 'undefined'
+    ? playerId
+    : `p_${Math.random().toString(36).substring(2, 10)}`
+
+  // 🔹 3. Sanitise имени
   const name = playerName?.trim().slice(0, 20) || `Player_${id.slice(-4)}`
 
-  // 🔹 Создаем или обновляем игрока
+  // 🔹 4. Создаём или обновляем игрока
   let player = room.getPlayer(id)
   if (!player) {
     player = room.addPlayer({
@@ -46,17 +51,17 @@ export async function handleJoinRoom(
     console.log(`♻️ [JOIN] Игрок обновлён: ${name} (${id})`)
   }
 
-  // 🔹 Привязываем сокет (критично!)
+  // 🔹 5. Привязываем сокет (критично!)
   room.addSocket(id, sock)
   console.log(`🔗 [JOIN] Socket привязан: ${id}, readyState=${sock.readyState}`)
 
-  // 🔹 Старт игры если 2+ игрока и статус LOBBY
+  // 🔹 6. Старт игры если 2+ игрока и статус LOBBY
   if (room.state.status === 'LOBBY' && room.playerCount >= 2) {
     room.startGame()
     console.log(`🎮 [JOIN] Игра стартовала!`)
   }
 
-  // 🔹 Формируем ответ с новым playerId (если создан)
+  // 🔹 7. Формируем ответ с новым playerId (если создан)
   const payload = buildSyncPayload(room.state)
   const message = JSON.stringify({
     type: 'SYNC_STATE',
@@ -65,9 +70,9 @@ export async function handleJoinRoom(
     ...(playerId !== id && { playerId: id, name })
   })
 
-  // 🔹 Отправляем ЭТОМУ игроку
+  // 🔹 8. Отправляем ЭТОМУ игроку
   try {
-    if (sock.readyState === 1) {
+    if (sock.readyState === 1) { // WebSocket.OPEN
       sock.send(message)
       console.log(`🚀 [JOIN] SYNC_STATE отправлен`)
     }
@@ -75,7 +80,7 @@ export async function handleJoinRoom(
     console.error(`💥 [JOIN] Ошибка отправки:`, e)
   }
 
-  // 🔹 Рассылаем остальным (опционально, что новый игрок присоединился)
+  // 🔹 9. Рассылаем остальным (опционально, что новый игрок присоединился)
   const views = roomManager.getAllRoomViews()
   const roomViews = views.get(room.id)
   if (roomViews && !playerId) {  // Только если это новый игрок

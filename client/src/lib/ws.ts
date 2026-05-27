@@ -89,6 +89,7 @@ export function initWs(
         const safeRoomId = roomId.value && roomId.value !== 'null' ? roomId.value : null
 
         // 🔑 Если нет валидного playerId — не отправляем игровые действия
+        console.log(payload. safePlayerId)
         if (payload.playerId !== undefined && !safePlayerId) {
           console.error('❌ [WS] Blocked send: invalid playerId', {
             myId: myId.value,
@@ -126,13 +127,29 @@ export function sendEvent(payload: any) {
   const safeRoomId = roomId.value && roomId.value !== 'null' ? roomId.value : null
 
   // 🔑 Если нет валидного playerId — не отправляем игровые действия
-  if (payload.playerId !== undefined && !safePlayerId) {
-    console.error(`❌ [WS] Blocked send: invalid playerId`, {
-      myId: myId.value,
-      stored: sessionStorage.getItem('monopoly_playerId'),
-      payloadType: payload.type
-    })
-    return false
+  console.log(payload, safePlayerId)
+  const allowsAnonymous = ['JOIN_ROOM', 'GET_LOBBY', 'REGISTER', 'LOGIN'].includes(payload.type)
+
+// 🔹 Если playerId указан в пейлоаде, но не совпадает с сессией → блокируем (защита от подмены)
+  if (payload.playerId !== undefined && !allowsAnonymous) {
+    const safePlayerId = myId.value || sessionStorage.getItem('monopoly_playerId')
+
+    if (payload.playerId !== safePlayerId) {
+      console.error(`❌ [WS] Blocked send: playerId mismatch`, {
+        myId: myId.value,
+        stored: sessionStorage.getItem('monopoly_playerId'),
+        payloadType: payload.type,
+        payloadId: payload.playerId
+      })
+      return false
+    }
+  }
+
+// 🔹 Для игровых событий (не анонимных) требуем, чтобы игрок был в сессии
+  const requiresAuth = !['JOIN_ROOM', 'GET_LOBBY', 'REGISTER', 'LOGIN'].includes(payload.type)
+  if (requiresAuth && !myId.value && !sessionStorage.getItem('monopoly_playerId')) {
+    console.warn(`⚠️ [WS] Auth required for ${payload.type}, but no playerId in session`)
+    // Не блокируем жестко — пусть сервер сам отклонит, если нужно
   }
 
   const finalPayload = {
