@@ -58,7 +58,7 @@ export class Room {
   removeSocket(pid: string) { this.sockets.delete(pid) }
 
   addPlayer(p: Omit<Player, 'properties' | 'houses' | 'isInJail' | 'jailTurns' | 'jailCards' | 'consecutiveDoubles' | 'isReady' | 'mortgaged' | 'isBankrupt'>) {
-    const newP: Player = { ...p, properties: [], houses: {}, mortgaged: [], isInJail: false, jailTurns: 0, jailCards: 0, consecutiveDoubles: 0, housesBoughtThisTurn: false, isReady: this.state.players.length === 0, isBankrupt: false }
+    const newP: Player = { ...p, properties: [], houses: {}, mortgaged: [], isInJail: false, jailTurns: 0, jailCards: 0, consecutiveDoubles: 0, housesBoughtThisTurn: false, isReady: false, isBankrupt: false }
     this.state.players.push(newP)
     return newP
   }

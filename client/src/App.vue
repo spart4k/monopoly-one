@@ -32,9 +32,15 @@ onMounted(() => {
           store.updateRoomsList(data.rooms)  // 🔹 Это обновит availableRooms в Lobby.vue
         }
 
-        if (data.type === 'MY_ID' && data.playerId && data.roomId) {
-          sessionStorage.setItem('monopoly_playerId', data.playerId)
+        if ((data.type === 'ROOM_JOINED' || data.type === 'MY_ID') && data.roomId) {
+          console.log(`✅ [APP] Room confirmed: ${data.roomId}`)
           sessionStorage.setItem('monopoly_roomId', data.roomId)
+
+          // 🔹 Сохраняем в стор (мгновенно реактивно!)
+          store.currentRoomId = data.roomId
+
+          // 🔹 Если используешь useSession, обновляем и его
+          if (roomId && roomId.value !== data.roomId) roomId.value = data.roomId
         }
 
         // 🔹 Обработка НОВОГО события: отложенный арест

@@ -165,12 +165,10 @@ fastify.register(async (server) => {
             return socket.send(JSON.stringify({ type: 'ERROR', message: 'Room ID required' }))
           }
 
-          // 🔹 ИСПРАВЛЕНО: используем getOrCreateRoom вместо createRoom
           console.log(`🔍 [JOIN_ROOM] Getting or creating room: ${roomId}`)
           const room = await roomManager.getOrCreateRoom(roomId)
           console.log(`✅ [JOIN_ROOM] Room ready: ${roomId}`)
 
-          // 🔹 Вызываем хендлер (он добавит игрока в комнату)
           console.log(`🔗 [JOIN_ROOM] Calling handleJoinRoom...`)
           const result = await handleJoinRoom(room, playerId, name || 'Player', socket, roomManager)
           console.log(`✅ [JOIN_ROOM] handleJoinRoom result:`, result)
@@ -186,10 +184,20 @@ fastify.register(async (server) => {
             }))
           }
 
+          // 🔹 КРИТИЧНО: ВСЕГДА отправляем, что игрок в комнате (даже если playerId не изменился)
+          console.log(`📤 [JOIN_ROOM] Sending ROOM_JOINED: ${roomId}`)
+          socket.send(JSON.stringify({
+            type: 'ROOM_JOINED',
+            roomId,
+            playerId: result.playerId || playerId,
+            name: name || 'Player'
+          }))
+
+          // 🔹 Обновляем список комнат у всех
           broadcastLobbyUpdate()
 
           console.log(`✅ [JOIN_ROOM] DONE, returning`)
-          return  // 🔹 КРИТИЧНО: выходим, чтобы не шла общая проверка комнаты
+          return
         }
 
         // =================================================================

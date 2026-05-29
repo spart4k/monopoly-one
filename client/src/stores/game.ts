@@ -1,133 +1,136 @@
+// client/src/stores/game.ts
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
 export type Player = {
-  id: string; name: string; color: string; pos: number; money: number
-  properties: number[]; houses: Record<number, number>; mortgaged: number[]
-  isInJail: boolean; jailTurns: number; jailCards: number
-  consecutiveDoubles: number; housesBoughtThisTurn: boolean; isReady?: boolean; isBankrupt?: boolean
+  id: string
+  name: string
+  color: string
+  pos: number
+  money: number
+  properties: number[]
+  houses: Record<number, number>
+  mortgaged: number[]
+  isInJail: boolean
+  jailTurns: number
+  jailCards: number
+  consecutiveDoubles: number
+  housesBoughtThisTurn: boolean
+  isReady: boolean
+  isBankrupt: boolean
 }
 
-export type PendingCard = { text: string; action: string; amount?: number; targetSpaceId?: number }
-export type PendingPayment = { amount: number; creditorId: string | null; type: 'rent' | 'tax' | 'bonus' }
-export type PendingInfo = { title: string; message: string; icon: string; amount?: number; spaceId?: number; isMandatory?: boolean }
+export type GameState = {
+  status: 'LOBBY' | 'PLAYING' | 'ENDED'
+  players: Player[]
+  currentTurn: string | null
+  actionPending: 'NONE' | 'BUY' | 'PAY' | 'ROLL' | 'JAIL' | 'TRADE'
+  dice?: [number, number]
+  lastAction?: string
+  logs: string[]
+  gameOver: boolean
+  winnerId: string | null
+}
 
 export const useGameStore = defineStore('game', () => {
+  // 🔹 Состояние игры
   const status = ref<'LOBBY' | 'PLAYING' | 'ENDED'>('LOBBY')
-  const lastDice = ref<[number, number]>([1, 1])
   const players = ref<Player[]>([])
-  const logs = ref<string[]>([])
   const currentTurn = ref<string | null>(null)
   const actionPending = ref<'NONE' | 'BUY' | 'PAY' | 'ROLL' | 'JAIL' | 'TRADE'>('NONE')
+  const dice = ref<[number, number] | undefined>()
+  const lastAction = ref<string | undefined>()
+  const logs = ref<string[]>([])
+  const gameOver = ref(false)
+  const winnerId = ref<string | null>(null)
+  const currentRoomId = ref<string | null>(null)
 
-  // 🔹 Список комнат в лобби (отдельно!)
-  const availableRooms = ref<Array<{id: string, status: string, players: any[]}>>([])
+  // 🔹 Список комнат в лобби (отдельно от состояния игры!)
+  const availableRooms = ref<Array<{
+    id: string
+    status: string
+    players: Array<{ id: string; name: string; isReady: boolean }>
+    maxPlayers: number
+    createdBy: string | null
+  }>>([])
 
-  // 🔹 Обновление состояния из SYNC_STATE
-  const updateState = (payload: any) => {
+  // 🔹 Обновление состояния игры из SYNC_STATE
+  const updateState = (payload: GameState) => {
+    console.log('🔄 [STORE] Updating state:', payload)
+
     if (payload.status) status.value = payload.status
     if (payload.players) players.value = payload.players
     if (payload.currentTurn !== undefined) currentTurn.value = payload.currentTurn
     if (payload.actionPending) actionPending.value = payload.actionPending
+    if (payload.dice) dice.value = payload.dice
+    if (payload.lastAction) lastAction.value = payload.lastAction
+    if (payload.logs) logs.value = payload.logs
+    if (payload.gameOver !== undefined) gameOver.value = payload.gameOver
+    if (payload.winnerId !== undefined) winnerId.value = payload.winnerId
+
+    console.log('✅ [STORE] State updated:', {
+      status: status.value,
+      playerCount: players.value.length,
+      turn: currentTurn.value
+    })
   }
 
-  // 🔹 Обновление списка комнат (КРИТИЧНО: присваиваем новый массив!)
+  // 🔹 Обновление списка комнат в лобби (КРИТИЧНО: создаём новый массив!)
   const updateRoomsList = (rooms: any[]) => {
-    console.log('🔄 [STORE] Rooms updated:', rooms)
-    availableRooms.value = [...rooms]  // 🔹 Создаём новый массив для реактивности
+    console.log('🔄 [STORE] Rooms list updated:', rooms)
+    // 🔹 Создаём новый массив для реактивности Vue
+    availableRooms.value = rooms.map((r: any) => ({
+      id: r.id,
+      status: r.status,
+      players: r.players || [],
+      maxPlayers: r.maxPlayers || 4,
+      createdBy: r.createdBy || null
+    }))
   }
 
-  // 🔹 Сброс
+  // 🔹 Применение событий от сервера (универсальный хендлер)
+  const applyEvent = (data: any) => {
+    if (data.type === 'SYNC_STATE' && data.payload) {
+      updateState(data.payload)
+    }
+    if (data.type === 'ROOMS_LIST' && Array.isArray(data.rooms)) {
+      updateRoomsList(data.rooms)
+    }
+    // Можно добавить обработку других событий здесь
+  }
+
+  // 🔹 Сброс состояния (при выходе из комнаты)
   const reset = () => {
     status.value = 'LOBBY'
     players.value = []
     currentTurn.value = null
     actionPending.value = 'NONE'
+    dice.value = undefined
+    lastAction.value = undefined
+    logs.value = []
+    gameOver.value = false
+    winnerId.value = null
   }
 
-  const pendingAction = ref<'BUY' | 'CARD' | 'INFO' | 'DOUBLE_TURN' | null>(null)
-  const selectedSpaceId = ref<number | null>(null)
-  const pendingInfo = ref<PendingInfo | null>(null)
-  const pendingCard = ref<PendingCard | null>(null)
-  const pendingPayment = ref<PendingPayment | null>(null)
-  const activeTrade = ref<any>(null)
-
-  const gameOver = ref(false)
-  const winnerId = ref<string | null>(null)
-  const winnerName = ref<string | null>(null)
-
-  function applyEvent(event: any) {
-    if (!event?.type) return
-    try {
-      switch (event.type) {
-        case 'ROOMS_LIST': availableRooms.value = event.rooms || []; break
-        case 'SYNC_STATE':
-          if (!event.payload) return
-          status.value = event.payload.status || 'LOBBY'
-          currentTurn.value = event.payload.currentTurn || ''
-          players.value = event.payload.players || []
-          if (event.payload.lastDice) lastDice.value = event.payload.lastDice
-          pendingAction.value = event.payload.actionPending || null
-          pendingCard.value = event.payload.pendingCard || null
-          pendingPayment.value = event.payload.pendingPayment || null
-          selectedSpaceId.value = event.payload.selectedSpaceId ?? null
-          activeTrade.value = event.payload.activeTrade || null
-          if (Array.isArray(event.payload.logs)) logs.value = [...event.payload.logs.slice(-50)]
-          break
-        case 'PLAYER_MOVED':
-          lastDice.value = event.dice || [0, 0]
-          const p = players.value.find((pl: Player) => pl.id === event.playerId)
-          if (p) p.pos = event.to
-          break
-        case 'MY_ID':
-          if (event.playerId && event.roomId) {
-            if (typeof window !== 'undefined') {
-              sessionStorage.setItem('monopoly_playerId', event.playerId)
-              sessionStorage.setItem('monopoly_roomId', event.roomId)
-            }
-          }
-          break
-        case 'OFFER_BUY': pendingAction.value = 'BUY'; selectedSpaceId.value = event.spaceId; break
-        case 'GO_TO_JAIL':
-          const pJail = players.value.find((p: Player) => p.id === event.playerId)
-          if (pJail) {
-            // 🔹 Реальное перемещение (после отложенного приговора)
-            pJail.pos = 10
-            pJail.isInJail = true
-            pJail.jailTurns = 0
-            pJail.consecutiveDoubles = 0
-            logs.value.unshift(`🚔 ${pJail.name} перемещён в тюрьму`)
-          }
-          break
-        case 'ACTION_REQUIRED':
-          pendingAction.value = 'INFO'
-          pendingInfo.value = event
-          selectedSpaceId.value = event.spaceId ?? null
-          // 🔹 Если это карта/тюрьма, сбрасываем ID улицы, чтобы модалка не показывала чужую
-          if (event.type === 'CARD' || event.title === '🚔 Тюрьма' || event.title?.includes('Шанс') || event.title?.includes('Казна')) {
-            selectedSpaceId.value = null
-          }
-          break
-        case 'DOUBLE_ROLLED': pendingAction.value = 'DOUBLE_TURN'; break
-        case 'GAME_OVER':
-          gameOver.value = true
-          winnerId.value = event.winnerId || null
-          winnerName.value = event.winnerName || null
-          console.log(`🏁 [STORE] Game over! Winner: ${winnerName.value || 'Никто'}`)
-          break
-        case 'ERROR': console.warn('⚠️ STORE ERROR:', event.message); logs.value.unshift(`❌ ${event.message}`); break
-      }
-    } catch (err) { console.error('💥 STORE applyEvent crash:', err) }
-  }
-
-  function clearPendingAction() {
-    pendingAction.value = null; selectedSpaceId.value = null; pendingInfo.value = null; pendingCard.value = null
-  }
-
+  // 🔹 Экспортируем ВСЕ нужные поля и методы
   return {
-    status, currentTurn, players, logs, availableRooms, lastDice,
-    pendingAction, selectedSpaceId, pendingInfo, pendingCard, pendingPayment, activeTrade,
-    gameOver, winnerId, winnerName,
-    applyEvent, clearPendingAction
+    // Состояние
+    status,
+    players,
+    currentTurn,
+    actionPending,
+    dice,
+    lastAction,
+    logs,
+    gameOver,
+    winnerId,
+    availableRooms,  // 🔹 Важно!
+    currentRoomId,
+
+    // Методы
+    updateState,
+    updateRoomsList,  // 🔹 КРИТИЧНО: эта функция должна быть здесь!
+    applyEvent,
+    reset
   }
 })
